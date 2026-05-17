@@ -137,9 +137,25 @@ def process_order(order_id: int):
       supplier's external product id (provider_product_id).
     - Mirrors the auto-refund / manual_pending logic of the legacy
       in-process worker.
+    - V73 (Option A): every supplier response is persisted on the order row
+      via update_order_provider_response so we can recover an order_id the
+      parser missed and diagnose stuck orders without re-running them.
     """
-    from database import get_order, get_product_by_id, update_order, get_setting
+    import json as _json
+    from database import (
+        get_order, get_product_by_id, update_order, get_setting,
+        update_order_provider_response,
+    )
     from providers import create_provider_order, normalize_supplier_create_status
+
+    def _persist_raw(payload):
+        # Best-effort serialise — JSON when possible, repr() as a last
+        # resort. Never raises (see update_order_provider_response).
+        try:
+            text = _json.dumps(payload, ensure_ascii=False, default=str)
+        except Exception:
+            text = repr(payload)
+        update_order_provider_response(order_id, text)
 
     try:
         order = get_order(order_id)
@@ -175,6 +191,10 @@ def process_order(order_id: int):
         )
         log.info("process_order %s: supplier response keys=%s",
                  order_id, list(res.keys()) if isinstance(res, dict) else type(res).__name__)
+        # V73 (Option A): persist the raw response BEFORE any branching so
+        # we have the full payload on disk even if the next steps crash or
+        # the parser misses an order_id field.
+        _persist_raw(res)
 
         auto_refund = get_setting("auto_refund_on_failure", "0") == "1"
 
@@ -206,6 +226,17 @@ def process_order(order_id: int):
             return
 
         target_status = norm.get("status") or "supplier_pending"
+        # V73 (Option A): when the parser still couldn't find a
+        # provider_order_id even after the smart recursive fallback,
+        # log loudly. The raw response is already persisted so the admin
+        # (or the future orphan-sweep task) can investigate.
+        if not provider_order_id and target_status != "completed":
+            log.warning(
+                "process_order %s: supplier accepted order but no order_id "
+                "could be parsed from response. Raw response saved on the "
+                "orders row for manual recovery.",
+                order_id,
+            )
         # Only true completion ends the cycle; anything else stays pending
         # for the periodic poller to pick up.
         if target_status == "completed":

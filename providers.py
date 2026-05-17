@@ -313,27 +313,156 @@ def _extract_order_id_from_response(provider: str, response: Dict[str, Any]) -> 
     سابقًا كنا نبحث في `response["order"]` و`response["order_id"]` فقط،
     فيُفقد رقم الطلب لأنه داخل `data` — وآلية المتابعة `refresh_pending_orders`
     تتخطّاه لاحقًا لأن `provider_order_id` فارغ، فيبقى الطلب عالقًا.
+
+    V73 (Option A): إذا فشل البحث الموجَّه أعلاه (لأن المورد غيّر شكل
+    الرد أو أرجع شكلاً جديداً غير معروف) نلجأ لبحث recursive يفتش كامل
+    شجرة JSON عن أوّل حقل اسمه يلائم order/transaction/tracking ويحمل
+    قيمة قابلة للاستخدام كـ id. هذا يمنع تكرار bug V68 مع أي مزوّد أو
+    أي تغيير مفاجئ في شكل الرد. كل القيم تمرّ عبر ``_looks_like_id_value``
+    فلا يُقبل bool ولا نص أطول من 80 حرفًا (يمنع تسرّب stack traces / HTML).
     """
     if not isinstance(response, dict):
         return ""
 
+    def _accept(value):
+        if _looks_like_id_value(value):
+            return str(value).strip()
+        return ""
+
     if provider == "server1":
         # G2Bulk: قد يأتي إما في المستوى الأعلى أو داخل data.
-        oid = response.get("order") or response.get("order_id") or response.get("id")
-        if not oid and isinstance(response.get("data"), dict):
+        for candidate in (response.get("order"),
+                          response.get("order_id"),
+                          response.get("id")):
+            picked = _accept(candidate)
+            if picked:
+                return picked
+        if isinstance(response.get("data"), dict):
             d = response["data"]
-            oid = d.get("order") or d.get("order_id") or d.get("id")
-        return str(oid or "")
+            for candidate in (d.get("order"), d.get("order_id"), d.get("id")):
+                picked = _accept(candidate)
+                if picked:
+                    return picked
+    else:
+        # server2 = Shop2Topup
+        # نجرب كل الأشكال المعروفة بالترتيب الأكثر شيوعًا.
+        for container_key in ("data", "order", "result"):
+            container = response.get(container_key)
+            if isinstance(container, dict):
+                for candidate in (container.get("order_id"),
+                                  container.get("id"),
+                                  container.get("orderId")):
+                    picked = _accept(candidate)
+                    if picked:
+                        return picked
+        for candidate in (response.get("order_id"),
+                          response.get("id"),
+                          response.get("orderId")):
+            picked = _accept(candidate)
+            if picked:
+                return picked
 
-    # server2 = Shop2Topup
-    # نجرب كل الأشكال المعروفة بالترتيب الأكثر شيوعًا.
-    for container_key in ("data", "order", "result"):
-        container = response.get(container_key)
-        if isinstance(container, dict):
-            oid = container.get("order_id") or container.get("id") or container.get("orderId")
-            if oid:
-                return str(oid)
-    return str(response.get("order_id") or response.get("id") or response.get("orderId") or "")
+    # V73 (Option A) — fallback: recursive smart search.
+    # إذا وصلنا هنا، الحقول المعروفة كلها فارغة. ندع المحرّك الذكي
+    # يحاول التقاط الـid قبل أن نعتبر الطلب يتيمًا. نتجاهل الحقل
+    # الخاص client_order_id الذي نولّده نحن (UUID) كي لا نلتقطه بدل
+    # رقم المورد الفعلي.
+    return _recursive_extract_id(response, ignore_keys={"client_order_id"})
+
+
+# V73 (Option A): قائمة أسماء الحقول التي تشير إلى رقم طلب لدى المورد.
+# مرتّبة حسب الأولوية — كلما كان الاسم أكثر تخصيصًا (يحوي order/tracking)
+# جاء أوّلاً. أي حقل اسمه يحوي إحدى هذه السلاسل وقيمته نص قصير أو رقم
+# يُعتبر مرشّحًا صالحًا لرقم طلب المورد.
+_ID_FIELD_PRIORITY = (
+    "provider_order_id",
+    "supplier_order_id",
+    "order_id",
+    "orderid",
+    "transaction_id",
+    "transactionid",
+    "tracking_id",
+    "trackingid",
+    "tracking_number",
+    "reference_id",
+    "referenceid",
+    "reference",
+    "txn_id",
+    "txnid",
+    "order",
+    "transaction",
+    "id",
+)
+
+
+def _looks_like_id_value(value) -> bool:
+    """صفّى القيم التي قد تكون رقم طلب صالحًا.
+
+    رقم/نص قصير (≤ 80 حرفًا) وغير فارغ. نستثني bool لأن `True/False`
+    تكون قيمة `id` بالخطأ في بعض الردود الغريبة.
+    """
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        s = value.strip()
+        return 0 < len(s) <= 80
+    return False
+
+
+def _recursive_extract_id(node: Any, ignore_keys=None, _depth: int = 0) -> str:
+    """ابحث ضمن أي شجرة JSON عن أول قيمة يبدو أنها رقم طلب مزوّد.
+
+    استراتيجية:
+      1. على كل dict، نمشي على ``_ID_FIELD_PRIORITY`` بالترتيب — يضمن أن
+         ``order_id`` يفوز على ``id`` لو الاثنين موجودَين في نفس المستوى.
+      2. لو لم نجد، نُكمل بحثًا عميقًا (DFS) في القيم.
+      3. الحد الأقصى للعمق 6 لمنع الدورات المرضيّة في ردود غريبة.
+      4. ``ignore_keys`` يحمي حقولًا نعرف أنها ليست رقم المورد (مثل
+         ``client_order_id`` الذي نولّده محليًا).
+    """
+    if _depth > 6:
+        return ""
+    ignore = {k.lower() for k in (ignore_keys or set())}
+
+    if isinstance(node, dict):
+        # 1. حقول الأولوية في هذا المستوى.
+        lowered = {str(k).lower(): k for k in node.keys()}
+        for needle in _ID_FIELD_PRIORITY:
+            if needle in ignore:
+                continue
+            actual = lowered.get(needle)
+            if actual is None:
+                continue
+            value = node.get(actual)
+            if _looks_like_id_value(value):
+                return str(value).strip()
+        # 2. مطابقة جزئية: أي مفتاح يحوي order/transaction/tracking.
+        for key, value in node.items():
+            kl = str(key).lower()
+            if kl in ignore:
+                continue
+            if any(s in kl for s in ("order", "transaction", "tracking", "reference")):
+                if _looks_like_id_value(value):
+                    return str(value).strip()
+        # 3. تعمّق في القيم (قد يكون الرقم داخل dict أو list).
+        for value in node.values():
+            if isinstance(value, (dict, list)):
+                found = _recursive_extract_id(value, ignore_keys=ignore_keys, _depth=_depth + 1)
+                if found:
+                    return found
+        return ""
+
+    if isinstance(node, list):
+        for item in node:
+            if isinstance(item, (dict, list)):
+                found = _recursive_extract_id(item, ignore_keys=ignore_keys, _depth=_depth + 1)
+                if found:
+                    return found
+        return ""
+
+    return ""
 
 
 def _extract_status_from_response(provider: str, response: Dict[str, Any]) -> str:

@@ -126,6 +126,26 @@ def ensure_indexes():
             conn.execute("ALTER TABLE deposits ADD COLUMN proof_filename TEXT")
         except Exception:
             pass
+        # V73 (Option A): persist the raw supplier response per order so we
+        # can (a) recover a provider_order_id that the parser missed and
+        # (b) diagnose why an order ended up stuck without re-running it.
+        # The column stores a JSON-encoded blob produced by tasks.process_order
+        # (capped to ~4KB to keep the table compact). NULL by default for
+        # legacy rows; new rows are populated on every supplier call.
+        try:
+            conn.execute("ALTER TABLE orders ADD COLUMN provider_response_raw TEXT")
+        except Exception:
+            pass
+        # Helps the future "find orphan orders" sweep filter rows that have
+        # a saved response but no extracted provider_order_id.
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_orders_orphan "
+                "ON orders(status, provider_order_id) "
+                "WHERE provider_response_raw IS NOT NULL"
+            )
+        except Exception:
+            pass
         conn.commit()
 
 
@@ -1263,6 +1283,40 @@ def update_order(order_id, status, provider_order_id=None, note=None):
 def list_user_orders(user_id):
     with db_conn() as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()]
+
+
+# V73 (Option A): persist the supplier's raw response on the order row so
+# we can recover an order_id the parser missed, or diagnose a stuck order
+# after the fact. Caller is responsible for serialising `payload` to JSON
+# (or any string) — we just truncate and write. Never raises: a failed
+# write here must never fail the order itself.
+_PROVIDER_RAW_MAX_LEN = 4096
+
+
+def update_order_provider_response(order_id, payload):
+    """Store the (already-stringified) supplier response on an existing order.
+
+    The column is purely diagnostic — readers should treat it as opaque
+    text and only parse it when investigating a stuck order. We cap the
+    length to keep the orders table compact (responses with deeply nested
+    debug payloads have been observed at >50KB on some suppliers).
+    """
+    if not order_id:
+        return False
+    try:
+        text = "" if payload is None else str(payload)
+        if len(text) > _PROVIDER_RAW_MAX_LEN:
+            text = text[: _PROVIDER_RAW_MAX_LEN - 1] + "…"
+        with db_conn() as conn:
+            conn.execute(
+                "UPDATE orders SET provider_response_raw=? WHERE id=?",
+                (text, int(order_id)),
+            )
+            conn.commit()
+        return True
+    except Exception:
+        # Diagnostics must never break the order pipeline.
+        return False
 
 
 def list_orders(status=None):
