@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>المحاسبة والأرباح</h1>
+<p class="muted">حساب مبسط يعتمد على الطلبات المكتملة: الربح = سعر البيع - تكلفة المزود المسجلة في الباقة.</p>
+
+<div class="stats-grid">
+  <div class="stat-card"><span>المبيعات</span><b>{{ "%.2f"|format(data.display_sales or 0) }}$</b></div>
+  <div class="stat-card"><span>التكلفة</span><b>{{ "%.2f"|format(data.cost or 0) }}$</b></div>
+  <div class="stat-card"><span>الربح الصافي</span><b>{{ "%.2f"|format(data.display_profit or 0) }}$</b></div>
+  <div class="stat-card"><span>طلبات مكتملة</span><b>{{ data.orders_count }}</b></div>
+</div>
+
+
+<div class="card" style="margin:18px 0">
+  <h2>تصحيح رقم المبيعات المعروض</h2>
+  <p class="muted">استخدم هذا الخيار لإصلاح رقم المبيعات الظاهر إذا تأثر بأخطاء النسخ السابقة. هذا لا يحذف الطلبات ولا يغيّر سجل العمليات، فقط يصحح الرقم المعروض في المحاسبة.</p>
+  <form method="post" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label style="flex:1;min-width:220px">رقم المبيعات الصحيح بالدولار
+      <input name="sales_override" type="number" step="0.01" min="0" value="{{ data.sales_override or '' }}" placeholder="مثال: 1500">
+    </label>
+    <button class="btn primary" type="submit">حفظ التصحيح</button>
+    <button class="btn" name="sales_override" value="" type="submit">إلغاء التصحيح</button>
+  </form>
+  <p class="muted">القيمة المحسوبة من السجل حاليًا: {{ "%.2f"|format(data.sales or 0) }}$</p>
+</div>
+
+<h2>الأرباح حسب اللعبة</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>اللعبة</th><th>الطلبات</th><th>المبيعات</th><th>التكلفة</th><th>الربح</th></tr></thead>
+<tbody>
+{% for r in data.by_game %}
+<tr>
+  <td>{{ r.game_name }}</td>
+  <td>{{ r.orders_count }}</td>
+  <td>{{ "%.2f"|format(r.sales or 0) }}$</td>
+  <td>{{ "%.2f"|format(r.cost or 0) }}$</td>
+  <td><b>{{ "%.2f"|format(r.profit or 0) }}$</b></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+
+<h2>آخر الطلبات المكتملة</h2>
+<div class="table-wrap">
+<table>
+<thead><tr><th>رقم</th><th>المستخدم</th><th>اللعبة</th><th>الباقة</th><th>البيع</th><th>التكلفة</th><th>الربح</th></tr></thead>
+<tbody>
+{% for o in data.recent %}
+<tr>
+  <td>{{ o.order_code }}</td>
+  <td>{{ o.user_email }}</td>
+  <td>{{ o.game_name }}</td>
+  <td>{{ o.product_name }}</td>
+  <td>{{ "%.2f"|format(o.price or 0) }}$</td>
+  <td>{{ "%.2f"|format(o.cost or 0) }}$</td>
+  <td><b>{{ "%.2f"|format(o.profit or 0) }}$</b></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

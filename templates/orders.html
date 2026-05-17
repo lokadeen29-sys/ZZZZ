@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <div class="orders-header">
+    <h1>{{ t("my_orders") }}</h1>
+    <div class="orders-filter" id="orders-filter">
+      <button class="filter-btn active" data-filter="all">{{ "All" if is_en else "الكل" }}</button>
+      <button class="filter-btn" data-filter="waiting">⏳ {{ t("waiting") }}</button>
+      <button class="filter-btn" data-filter="processing">🔄 {{ t("processing") }}</button>
+      <button class="filter-btn" data-filter="completed">✅ {{ t("completed") }}</button>
+      <button class="filter-btn" data-filter="rejected">❌ {{ t("rejected") }}</button>
+    </div>
+  </div>
+
+  {% if orders %}
+  <div class="orders-list">
+    {% for o in orders %}
+    <div class="order-card" data-status="{{ o.status }}">
+      <div class="order-card-top">
+        <div class="order-game-info">
+          <span class="order-game-name">🎮 {{ o.game_name or o.game_key }}</span>
+          <span class="order-pkg">{{ o.product_name|public_package_name }}</span>
+        </div>
+        <div class="order-status-wrap">
+          {% if o.status == 'waiting' %}
+            <span class="order-status-badge s-waiting">⏳ {{ t("waiting") }}</span>
+          {% elif o.status in ('processing','supplier_pending') %}
+            <span class="order-status-badge s-processing">🔄 {{ t("processing") }}</span>
+          {% elif o.status == 'manual_pending' %}
+            <span class="order-status-badge s-pending">🕐 {{ t("manual_pending") }}</span>
+          {% elif o.status == 'completed' %}
+            <span class="order-status-badge s-completed">✅ {{ t("completed") }}</span>
+          {% elif o.status == 'rejected' %}
+            <span class="order-status-badge s-rejected">❌ {{ t("rejected") }}</span>
+          {% else %}
+            <span class="order-status-badge s-pending">{{ o.status }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <div class="order-card-bottom">
+        <div class="order-meta">
+          <span class="order-code-wrap">
+            <code class="order-code" id="oc-{{ o.id }}">{{ o.order_code }}</code>
+            <button class="copy-btn" data-code="{{ o.order_code }}" data-id="{{ o.id }}" title="{{ 'Copy order code' if is_en else 'نسخ رقم الطلب' }}">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </span>
+          <span class="order-player">{{ "ID: " }}{{ o.player_id }}</span>
+        </div>
+        <div class="order-right">
+          <span class="order-price">{{ wallet_money(o.price) }}</span>
+          <span class="order-date">{{ o.created_at|syria_time }}</span>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div id="no-orders-msg" style="display:none" class="empty-state">
+    {{ "No orders found for this filter." if is_en else "لا توجد طلبات لهذا التصفية." }}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <p>{{ "No orders yet." if is_en else "لا توجد طلبات بعد." }}</p>
+    <a class="btn primary" href="{{ url_for('home') }}">{{ "Browse Games" if is_en else "تصفح الألعاب" }}</a>
+  </div>
+  {% endif %}
+</section>
+
+<script src="{{ url_for('static', filename='js/pages/orders.js') }}" defer nonce="{{ csp_nonce }}"></script>
+{% endblock %}

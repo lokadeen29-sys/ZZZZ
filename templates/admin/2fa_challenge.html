@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <div class="form card auth-card" style="max-width:460px;margin:0 auto">
+    <h2>المصادقة الثنائية</h2>
+    <p class="muted" style="font-size:14px;line-height:1.7">
+      أدخل الرمز المكوَّن من 6 أرقام من تطبيق المصادقة، أو استخدم
+      أحد رموز الاسترداد إذا فقدت الوصول إلى التطبيق.
+    </p>
+
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>الرمز</label>
+      <input name="code" type="text" inputmode="text" maxlength="32"
+             autocomplete="one-time-code" required autofocus
+             placeholder="000000"
+             style="font-size:22px;letter-spacing:4px;text-align:center;font-family:monospace">
+      <button class="btn primary" type="submit" style="margin-top:18px;width:100%">
+        تحقق ومتابعة
+      </button>
+    </form>
+
+    <p class="muted" style="margin-top:20px;font-size:12px;text-align:center">
+      رموز الاسترداد للاستخدام لمرة واحدة فقط. بعد استخدام واحد
+      يبقى 9 — وهكذا. أعد توليد الرموز من لوحة الإدارة بمجرد عودة التطبيق.
+    </p>
+  </div>
+</section>
+{% endblock %}

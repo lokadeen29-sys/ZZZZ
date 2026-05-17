@@ -1,0 +1,26 @@
+Flask==3.1.3
+Werkzeug==3.1.6
+Flask-WTF==1.2.1
+Flask-Limiter==3.8.0
+Flask-Compress==1.15
+Flask-Babel==4.0.0
+requests==2.33.0
+python-dotenv==1.2.2
+gunicorn==23.0.0
+Authlib==1.6.11
+Pillow==12.2.0
+# V45: durable background queue (optional — activated only if REDIS_URL is set)
+redis==5.0.8
+rq==1.16.2
+# V51 (task B): TOTP 2FA for admin accounts + QR code rendering
+pyotp==2.9.0
+qrcode==7.4.2
+# V52 (task D): structured logging + error tracking.
+# Both are activated lazily — absence of SENTRY_DSN / LOG_JSON=1 leaves the
+# legacy logging format untouched, so production rollout can be staged.
+sentry-sdk[flask]==2.14.0
+python-json-logger==2.0.7
+# V53 (PR #17): HTML sanitiser used by sanitize.py for admin input hardening.
+# sanitize.py imports bleach but the dep was never added to requirements,
+# so CI fails on a clean runner. Pin to a stable 6.x.
+bleach==6.2.0

@@ -1,0 +1,119 @@
+/* =========================================================================
+   V41 — Typography polish, skeleton loaders, micro-interactions, scroll UX
+   Loaded AFTER v40-improvements.css so these rules win without !important.
+   ========================================================================= */
+
+/* ---- Tajawal as the primary Arabic typeface, Inter as Latin fallback ---- */
+:root {
+  --font-arabic: "Tajawal", "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-latin: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ease-out-quint: cubic-bezier(.22,1,.36,1);
+}
+html[dir="rtl"] body { font-family: var(--font-arabic); }
+html[dir="ltr"] body { font-family: var(--font-latin); }
+h1, h2, h3, h4, .tg-brand { letter-spacing: -0.01em; font-weight: 700; }
+
+/* ---- Smooth scroll, no jank ---- */
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+/* ---- Custom scrollbar (subtle, brand-tinted) ---- */
+* { scrollbar-width: thin; scrollbar-color: rgba(124,58,237,.45) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #7c3aed, #a78bfa); border-radius: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- Skeleton loader (use class .skeleton on any block) ---- */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: rgba(148,163,184,.18);
+  border-radius: 10px;
+  color: transparent !important;
+}
+.skeleton::after {
+  content: "";
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,.18) 50%, transparent 100%);
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.4s var(--ease-out-quint) infinite;
+}
+[dir="rtl"] .skeleton::after { animation-name: skeleton-shimmer-rtl; }
+@keyframes skeleton-shimmer { 100% { transform: translateX(100%); } }
+@keyframes skeleton-shimmer-rtl { 100% { transform: translateX(-100%); } 0% { transform: translateX(100%); } }
+.skeleton-text { height: 1em; margin: .35em 0; }
+.skeleton-title { height: 1.4em; width: 60%; }
+.skeleton-card { height: 180px; margin: 12px 0; }
+
+/* ---- Cards lift on hover (only where .card or .tg-card exists) ---- */
+.card, .tg-card, .product-card, .game-card {
+  transition: transform .35s var(--ease-out-quint),
+              box-shadow .35s var(--ease-out-quint),
+              border-color .35s var(--ease-out-quint);
+  will-change: transform;
+}
+@media (hover: hover) {
+  .card:hover, .tg-card:hover, .product-card:hover, .game-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 32px -18px rgba(124,58,237,.55);
+  }
+}
+
+/* ---- Buttons: refined press feedback ---- */
+.btn { transition: transform .12s ease, box-shadow .25s ease, background .25s ease; }
+.btn:active { transform: translateY(1px) scale(.985); }
+.btn.primary { box-shadow: 0 8px 22px -10px rgba(124,58,237,.6); }
+.btn.primary:hover { box-shadow: 0 12px 28px -10px rgba(124,58,237,.75); }
+
+/* ---- Inputs: clearer focus ring ---- */
+input, textarea, select {
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167,139,250,.25);
+}
+
+/* ---- Page enter animation (lightweight) ---- */
+main.container > * {
+  animation: page-fade .45s var(--ease-out-quint) both;
+}
+@keyframes page-fade {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Form-card refresh ---- */
+.auth-card {
+  border-radius: 18px;
+  backdrop-filter: blur(8px);
+}
+
+/* ---- Small "trust" footer-row helper ---- */
+.tg-trust-row {
+  display: flex; flex-wrap: wrap; gap: 12px; justify-content: center;
+  margin: 18px auto 8px; opacity: .85; font-size: 13px;
+}
+.tg-trust-row span {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+}
+
+/* ---- Back-to-top floating button ---- */
+.tg-to-top {
+  position: fixed; bottom: 22px; left: 22px; z-index: 50;
+  width: 44px; height: 44px; border-radius: 50%;
+  display: none; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #7c3aed, #a78bfa);
+  color: #fff; border: 0; cursor: pointer;
+  box-shadow: 0 10px 24px -10px rgba(124,58,237,.7);
+  transition: transform .2s ease, opacity .2s ease;
+}
+.tg-to-top.visible { display: inline-flex; }
+.tg-to-top:hover { transform: translateY(-2px); }
+[dir="ltr"] .tg-to-top { left: auto; right: 22px; }

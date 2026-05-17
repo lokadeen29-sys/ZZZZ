@@ -1,0 +1,26 @@
+{
+  "name": "TecnoGems - شحن ألعاب",
+  "short_name": "TecnoGems",
+  "description": "منصة شحن ألعاب سريعة وآمنة",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0a14",
+  "theme_color": "#7c3aed",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/static/img/logo-32.webp",
+      "sizes": "32x32",
+      "type": "image/webp"
+    },
+    {
+      "src": "/static/img/tecnogems-logo.webp",
+      "sizes": "192x192",
+      "type": "image/webp",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["games", "shopping"],
+  "lang": "ar",
+  "dir": "rtl"
+}

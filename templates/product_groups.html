@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <a class="muted" href="{{ url_for('home') }}">← العودة للألعاب</a>
+    <h1>{{ game.emoji or '🎮' }} {{ game.name }}</h1>
+    <p class="muted">اختر نوع الشحن المناسب.</p>
+  </div>
+</section>
+
+<div class="tg-search-wrap">
+  <input id="groupSearch" class="tg-search-input" type="search" placeholder="🔍 ابحث داخل الأقسام...">
+</div>
+
+<div class="tg-game-grid">
+  {% for g in groups %}
+    <a class="tg-game-card searchable-group" href="{{ url_for('products_group', provider=provider, game_key=game.game_key, group_id=g.id) }}">
+      <div class="tg-game-cover">
+        {# V62.1 FIX: previously fell back to react-assets/games/pubg.jpg which
+           made every imageless group look like PUBG. Use the game_image()
+           helper which already encodes the correct priority chain
+           (custom upload -> neon hi-res -> bundled art -> smart SVG fallback). #}
+        {% if g.image_url %}
+          <img src="{{ g.image_url }}" alt="{{ g.name }}" loading="lazy">
+        {% else %}
+          <img src="{{ game_image(game) }}" alt="{{ g.name }}" loading="lazy">
+        {% endif %}
+        <div class="tg-game-gradient"></div>
+        
+        <span class="tg-game-emoji">{{ game.emoji or '🎮' }}</span>
+      </div>
+      <div class="tg-game-body">
+        <h3>{{ g.name }}</h3>
+        <div class="tg-game-meta"><span>اضغط لعرض الباقات</span></div>
+      </div>
+    </a>
+  {% endfor %}
+</div>
+
+<script nonce="{{ csp_nonce }}">
+(function(){
+  const input = document.getElementById('groupSearch');
+  if (!input) return;
+  const cards = Array.from(document.querySelectorAll('.searchable-group'));
+  input.addEventListener('input', function(){
+    const q = this.value.trim().toLowerCase();
+    cards.forEach(card => card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none');
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <h1>أرصدة السيرفرات</h1>
+  <div class="grid two">
+    {% for key, value in balances.items() %}
+      <div class="card">
+        <h2>
+          {% if key == "server2" %}🟢 Shop2Topup <span class="muted" style="font-weight:500;font-size:13px">(سيرفر 2)</span>
+          {% elif key == "server1" %}🔵 G2Bulk <span class="muted" style="font-weight:500;font-size:13px">(سيرفر 1)</span>
+          {% else %}{{ key }}{% endif %}
+        </h2>
+        {% if value.error %}
+          <p class="alert danger">فشل الاستعلام: {{ value.error }}</p>
+        {% else %}
+          <div class="price">{{ value.balance or 0 }} {{ value.currency or "USD" }}</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

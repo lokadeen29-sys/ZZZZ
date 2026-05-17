@@ -1,0 +1,6 @@
+V39 stable:
+- Fixed CSRFError import.
+- Prevented stale CSRF by no-cache on auth pages.
+- Removed floating support buttons; contacts are footer-only.
+- Added safe next URL validation and security headers.
+- Verified with py_compile.
