@@ -1,0 +1,7 @@
+V31 changes:
+- Removed the middle "هل تحتاج مساعدة؟" WhatsApp/Telegram support strip.
+- Kept only a small floating WhatsApp icon.
+- Added stronger browser cache for static assets.
+- Added gzip compression for HTML/CSS/JS/JSON responses when supported.
+- Added minified CSS and JS and pointed templates to them.
+- No changes to orders, payments, database, or pricing logic.

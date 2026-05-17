@@ -1,0 +1,6 @@
+V33 urgent fixes:
+- Removed runtime /legacy redirect to stop Firefox redirect loop.
+- Canonical remains clean HTTPS without forcing browser redirect loops.
+- Arabic no longer switches to English on refresh because stale old sessions are ignored.
+- /lang/en still enables English intentionally; /lang/ar returns to Arabic default.
+- WhatsApp and Telegram now appear as fixed bottom icons in a vertical stack.

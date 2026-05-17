@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="legal-page" dir="rtl" lang="ar">
+  <h1>{{ "Terms of Service" if is_en else "شروط الاستخدام" }}</h1>
+  <p class="legal-updated">{{ "Last updated: 2025" if is_en else "آخر تحديث: 2025" }}</p>
+
+  {% if is_en %}
+  <section>
+    <h2>1. Acceptance of Terms</h2>
+    <p>By creating an account or using TecnoGems, you agree to these Terms of Service. If you do not agree, please do not use the platform.</p>
+  </section>
+
+  <section>
+    <h2>2. Service Description</h2>
+    <p>TecnoGems is a game top-up platform that allows users to purchase in-game currency, diamonds, UC, CP, cards, and other digital items for supported games.</p>
+  </section>
+
+  <section>
+    <h2>3. Account Rules</h2>
+    <ul>
+      <li>You must be at least 13 years old to create an account.</li>
+      <li>You are responsible for maintaining the confidentiality of your login credentials.</li>
+      <li>Each person may have only one account. Duplicate accounts may be suspended.</li>
+      <li>You must provide accurate information during registration.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. Permitted Use</h2>
+    <ul>
+      <li>Purchasing game top-ups for personal use.</li>
+      <li>Depositing funds into your wallet via approved payment methods.</li>
+      <li>Browsing available games and packages.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>5. Prohibited Use</h2>
+    <ul>
+      <li>Using the platform for money laundering or any illegal activity.</li>
+      <li>Submitting fake or manipulated payment proofs.</li>
+      <li>Attempting to exploit system vulnerabilities or abuse promotions.</li>
+      <li>Reselling services without authorization.</li>
+      <li>Using automated tools (bots) to interact with the platform.</li>
+      <li>Impersonating other users or staff members.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. Wallet & Balance</h2>
+    <ul>
+      <li>Wallet balance is non-transferable between accounts.</li>
+      <li>Deposits are credited after admin verification of payment proof.</li>
+      <li>We reserve the right to freeze balances in case of suspected fraud.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>7. Order Processing</h2>
+    <ul>
+      <li>Orders are processed automatically or manually depending on the product.</li>
+      <li>Processing time varies; most orders complete within minutes.</li>
+      <li>You are responsible for providing the correct Player ID. Orders sent to incorrect IDs cannot be reversed.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>8. Limitation of Liability</h2>
+    <ul>
+      <li>TecnoGems is not liable for game publisher decisions (bans, updates, server issues).</li>
+      <li>We are not responsible for delays caused by third-party payment processors or game providers.</li>
+      <li>Our total liability shall not exceed the amount of your last transaction.</li>
+      <li>We do not guarantee uninterrupted service availability.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>9. Account Suspension & Termination</h2>
+    <p>We reserve the right to suspend or terminate accounts that violate these terms, engage in fraudulent activity, or abuse the platform. Remaining balance in terminated accounts due to fraud is non-refundable.</p>
+  </section>
+
+  <section>
+    <h2>10. Changes to Terms</h2>
+    <p>We may update these terms at any time. Continued use of the platform after changes constitutes acceptance of the new terms.</p>
+  </section>
+
+  <section>
+    <h2>11. Contact</h2>
+    <p>For questions about these terms, please <a href="{{ url_for('contact') }}">contact us</a>.</p>
+  </section>
+
+  {% else %}
+
+  <section>
+    <h2>1. قبول الشروط</h2>
+    <p>بإنشاء حساب أو استخدام منصة TecnoGems، فإنك توافق على شروط الاستخدام هذه. إذا كنت لا توافق، يرجى عدم استخدام المنصة.</p>
+  </section>
+
+  <section>
+    <h2>2. وصف الخدمة</h2>
+    <p>TecnoGems هي منصة شحن ألعاب تتيح للمستخدمين شراء العملات داخل الألعاب والجواهر والشدات ونقاط CP والبطاقات وغيرها من العناصر الرقمية للألعاب المدعومة.</p>
+  </section>
+
+  <section>
+    <h2>3. قواعد الحساب</h2>
+    <ul>
+      <li>يجب أن يكون عمرك 13 عامًا على الأقل لإنشاء حساب.</li>
+      <li>أنت مسؤول عن الحفاظ على سرية بيانات تسجيل الدخول الخاصة بك.</li>
+      <li>يُسمح لكل شخص بحساب واحد فقط. قد يتم تعليق الحسابات المكررة.</li>
+      <li>يجب تقديم معلومات صحيحة عند التسجيل.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. الاستعمال المسموح</h2>
+    <ul>
+      <li>شراء شحن الألعاب للاستخدام الشخصي.</li>
+      <li>إيداع الأموال في محفظتك عبر طرق الدفع المعتمدة.</li>
+      <li>تصفح الألعاب والباقات المتاحة.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>5. الاستعمال المحظور</h2>
+    <ul>
+      <li>استخدام المنصة لغسيل الأموال أو أي نشاط غير قانوني.</li>
+      <li>تقديم إثباتات دفع مزيفة أو معدّلة.</li>
+      <li>محاولة استغلال ثغرات النظام أو إساءة استخدام العروض.</li>
+      <li>إعادة بيع الخدمات بدون تصريح.</li>
+      <li>استخدام أدوات آلية (بوتات) للتفاعل مع المنصة.</li>
+      <li>انتحال شخصية مستخدمين آخرين أو أعضاء فريق العمل.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. المحفظة والرصيد</h2>
+    <ul>
+      <li>رصيد المحفظة غير قابل للتحويل بين الحسابات.</li>
+      <li>يُضاف الإيداع بعد تحقق الإدارة من إثبات الدفع.</li>
+      <li>نحتفظ بالحق في تجميد الأرصدة في حالة الاشتباه بالاحتيال.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>7. معالجة الطلبات</h2>
+    <ul>
+      <li>تتم معالجة الطلبات تلقائيًا أو يدويًا حسب المنتج.</li>
+      <li>يختلف وقت المعالجة؛ معظم الطلبات تكتمل خلال دقائق.</li>
+      <li>أنت مسؤول عن إدخال معرّف اللاعب (Player ID) الصحيح. الطلبات المرسلة إلى معرّفات خاطئة لا يمكن استرجاعها.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>8. حدود المسؤولية</h2>
+    <ul>
+      <li>TecnoGems غير مسؤولة عن قرارات ناشري الألعاب (الحظر، التحديثات، مشاكل السيرفرات).</li>
+      <li>لسنا مسؤولين عن التأخيرات الناتجة عن معالجي الدفع أو مزوّدي الألعاب من طرف ثالث.</li>
+      <li>مسؤوليتنا الإجمالية لا تتجاوز مبلغ آخر معاملة لك.</li>
+      <li>لا نضمن توفر الخدمة بشكل مستمر دون انقطاع.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>9. تعليق وإنهاء الحساب</h2>
+    <p>نحتفظ بالحق في تعليق أو إنهاء الحسابات التي تنتهك هذه الشروط، أو تشارك في نشاط احتيالي، أو تسيء استخدام المنصة. الرصيد المتبقي في الحسابات المنتهية بسبب الاحتيال غير قابل للاسترداد.</p>
+  </section>
+
+  <section>
+    <h2>10. تعديل الشروط</h2>
+    <p>قد نقوم بتحديث هذه الشروط في أي وقت. يُعتبر استمرار استخدامك للمنصة بعد التغييرات بمثابة قبول للشروط الجديدة.</p>
+  </section>
+
+  <section>
+    <h2>11. تواصل معنا</h2>
+    <p>للأسئلة حول هذه الشروط، يرجى <a href="{{ url_for('contact') }}">التواصل معنا</a>.</p>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

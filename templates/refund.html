@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="legal-page" dir="rtl" lang="ar">
+  <h1>{{ "Refund Policy" if is_en else "سياسة الاسترجاع" }}</h1>
+  <p class="legal-updated">{{ "Last updated: 2025" if is_en else "آخر تحديث: 2025" }}</p>
+
+  {% if is_en %}
+  <section>
+    <h2>1. Overview</h2>
+    <p>Due to the nature of digital game top-up services, refunds are handled on a case-by-case basis. Please read this policy carefully before making a purchase.</p>
+  </section>
+
+  <section>
+    <h2>2. When We Issue Refunds</h2>
+    <ul>
+      <li><strong>Failed delivery:</strong> If your order was not delivered due to a system error on our side, you will receive a full refund to your wallet balance.</li>
+      <li><strong>Duplicate charge:</strong> If you were charged twice for the same order, the duplicate amount will be refunded.</li>
+      <li><strong>Service unavailable:</strong> If a game or package becomes unavailable after payment but before processing, a full refund is issued.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. When We Do NOT Issue Refunds</h2>
+    <ul>
+      <li><strong>Incorrect Player ID:</strong> If you entered the wrong Player ID and the top-up was delivered to another account, we cannot reverse it.</li>
+      <li><strong>Successfully delivered orders:</strong> Once items are delivered to the correct account, the order is final.</li>
+      <li><strong>Game publisher actions:</strong> If the game publisher bans your account or removes items after delivery, we are not responsible.</li>
+      <li><strong>Change of mind:</strong> We do not offer refunds for completed orders simply because you changed your mind.</li>
+      <li><strong>Fraudulent accounts:</strong> Balances in accounts terminated due to fraud or terms violation are non-refundable.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. Refund Method</h2>
+    <p>All approved refunds are credited to your TecnoGems wallet balance, not to external payment methods. This ensures the fastest resolution.</p>
+  </section>
+
+  <section>
+    <h2>5. Refund Timeline</h2>
+    <ul>
+      <li>Automatic refunds (system errors): processed immediately.</li>
+      <li>Manual review cases: processed within 24–72 hours after contacting support.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. How to Request a Refund</h2>
+    <p>Contact our support team with your order number and a description of the issue. We will review your request and respond as quickly as possible.</p>
+    <p><a href="{{ url_for('contact') }}">Contact Support</a></p>
+  </section>
+
+  {% else %}
+
+  <section>
+    <h2>1. نظرة عامة</h2>
+    <p>نظرًا لطبيعة خدمات شحن الألعاب الرقمية، يتم التعامل مع طلبات الاسترجاع حسب كل حالة على حدة. يرجى قراءة هذه السياسة بعناية قبل إجراء أي عملية شراء.</p>
+  </section>
+
+  <section>
+    <h2>2. متى نقوم بالاسترجاع</h2>
+    <ul>
+      <li><strong>فشل التسليم:</strong> إذا لم يتم تسليم طلبك بسبب خطأ تقني من جانبنا، ستحصل على استرجاع كامل إلى رصيد محفظتك.</li>
+      <li><strong>خصم مزدوج:</strong> إذا تم خصم المبلغ مرتين لنفس الطلب، سيتم استرجاع المبلغ المكرر.</li>
+      <li><strong>عدم توفر الخدمة:</strong> إذا أصبحت لعبة أو باقة غير متاحة بعد الدفع وقبل المعالجة، يتم إصدار استرجاع كامل.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. متى لا نقوم بالاسترجاع</h2>
+    <ul>
+      <li><strong>معرّف لاعب خاطئ:</strong> إذا أدخلت معرّف لاعب (Player ID) خاطئ وتم تسليم الشحن لحساب آخر، لا يمكننا عكس العملية.</li>
+      <li><strong>طلبات تم تسليمها بنجاح:</strong> بمجرد تسليم العناصر للحساب الصحيح، يكون الطلب نهائيًا.</li>
+      <li><strong>إجراءات ناشر اللعبة:</strong> إذا قام ناشر اللعبة بحظر حسابك أو إزالة العناصر بعد التسليم، فنحن غير مسؤولين.</li>
+      <li><strong>تغيير الرأي:</strong> لا نقدم استرجاعًا للطلبات المكتملة بسبب تغيير رأيك فحسب.</li>
+      <li><strong>الحسابات الاحتيالية:</strong> الأرصدة في الحسابات المنتهية بسبب الاحتيال أو انتهاك الشروط غير قابلة للاسترداد.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. طريقة الاسترجاع</h2>
+    <p>جميع عمليات الاسترجاع المعتمدة تُضاف إلى رصيد محفظتك في TecnoGems، وليس إلى طرق الدفع الخارجية. هذا يضمن أسرع حل ممكن.</p>
+  </section>
+
+  <section>
+    <h2>5. المدة الزمنية للاسترجاع</h2>
+    <ul>
+      <li>الاسترجاع التلقائي (أخطاء النظام): يتم معالجته فورًا.</li>
+      <li>حالات المراجعة اليدوية: يتم معالجتها خلال 24–72 ساعة بعد التواصل مع الدعم.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. كيفية طلب الاسترجاع</h2>
+    <p>تواصل مع فريق الدعم مع ذكر رقم الطلب ووصف المشكلة. سنراجع طلبك ونرد في أسرع وقت ممكن.</p>
+    <p><a href="{{ url_for('contact') }}">تواصل مع الدعم</a></p>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

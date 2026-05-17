@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <span class="tg-pill">{{ "Available now" if is_en else "متاح الآن" }}</span>
+    <h1>{{ ("Server 1" if is_en else "سيرفر 1") if provider=="server1" else ("Server 2" if is_en else "سيرفر 2") }}</h1>
+    <p class="muted">{{ "Pick a game to view its packages." if is_en else "اختر لعبتك لعرض الباقات المتاحة." }}</p>
+  </div>
+</section>
+
+{% if games %}
+  <div class="tg-search-wrap">
+    <input id="gameSearch" class="tg-search-input" type="search" placeholder="{{ ('Search a game...' if is_en else 'ابحث عن لعبة...') }}">
+  </div>
+
+  <div class="v60-games-grid" id="games-grid" style="max-width:1280px;margin:0 auto;padding:0 1.5rem 4rem">
+    {% for g in games %}
+      {% set img = game_image(g) if game_image is defined else (g.image_url if g.image_url else url_for('static', filename='img/games-neon/game-pubg.jpg')) %}
+      <a class="v60-game-card searchable-game"
+         data-name="{{ g.name|lower }}"
+         href="{{ url_for('products', provider=provider, game_key=g.game_key) }}">
+        <div class="v60-game-cover">
+          <img src="{{ img }}" alt="{{ g.name }}" loading="{% if loop.index <= 8 %}eager{% else %}lazy{% endif %}" decoding="async" width="600" height="800">
+          <div class="v60-game-cover-fade"></div>
+          {% if loop.index <= 3 %}
+            <span class="v60-hot-badge">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67z"/></svg>
+              {{ "Hot" if is_en else "الأكثر طلبًا" }}
+            </span>
+          {% endif %}
+        </div>
+        <div class="v60-game-body">
+          <div class="v60-game-row">
+            <h3 class="v60-game-title">{{ g.name }}</h3>
+          </div>
+          <div class="v60-game-row" style="padding-top:0.4rem">
+            <span class="v60-game-price">{{ g.currency_label or g.subtitle or ("In-game currency" if is_en else "شحن داخل اللعبة") }}</span>
+            <span class="v60-game-cta">{{ "Top up" if is_en else "اشحن الآن" }}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
+            </span>
+          </div>
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+
+  <div id="no-games-msg" class="empty-state" style="display:none">{{ "No games found." if is_en else "لا توجد نتائج." }}</div>
+
+  <script nonce="{{ csp_nonce }}">
+  (function(){
+    var input = document.getElementById('gameSearch');
+    if (!input) return;
+    var cards = Array.from(document.querySelectorAll('.searchable-game'));
+    var names = cards.map(function(c){ return (c.getAttribute('data-name') || '').toLowerCase(); });
+    var empty = document.getElementById('no-games-msg');
+    input.addEventListener('input', function(){
+      var q = this.value.trim().toLowerCase();
+      var visible = 0;
+      cards.forEach(function(c, i){
+        var show = !q || names[i].indexOf(q) !== -1;
+        c.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      if (empty) empty.style.display = visible ? 'none' : 'block';
+    });
+  })();
+  </script>
+{% else %}
+  <div class="card">
+    <h2>{{ "No games available" if is_en else "لا توجد ألعاب متاحة" }}</h2>
+    <p class="muted">{{ "Ask the admin to sync packages or enable games." if is_en else "اطلب من الأدمن مزامنة الباقات أو تفعيل الألعاب." }}</p>
+  </div>
+{% endif %}
+{% endblock %}

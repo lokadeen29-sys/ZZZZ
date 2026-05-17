@@ -1,0 +1,72 @@
+TecnoGems V35 — Security, performance, UX & bug fixes
+======================================================
+
+🐞 Bug fixes (الأهم بالنسبة لك):
+- إصلاح مشكلة تغيّر اللغة عند تحديث الصفحة:
+  * حذف كتلة prefetch من app.min.js و app.js (كانت تستدعي /lang/en بالخطأ).
+  * /lang/<lang> صار يقبل التغيير فقط إذا كانت الزيارة من نفس الموقع (Referer check)،
+    فلا preload ولا cache يستطيعان قلب اللغة.
+  * إضافة Cache-Control: no-store لمسار /lang/.
+- إصلاح زر واتساب العائم: ثابت أسفل-يسار الصفحة بشكل واضح.
+- إصلاح ظهور زر تيليغرام عند إضافته من الإعدادات:
+  * حذف الكتلتين CSS المكررتين المتعارضتين.
+  * إعادة كتابة قواعد .tg-support-stack نظيفة تدعم زر واحد أو أكثر.
+- استخدام أيقونات SVG ملوّنة (واتساب أخضر، تيليغرام أزرق) بدل النصوص "WA / TG".
+
+🔒 الأمان:
+- CSRF protection على جميع النماذج (Flask-WTF) — تم حقن csrf_token() في كل قوالب POST.
+- إعدادات Cookies آمنة: HttpOnly + SameSite=Lax + Secure (تلقائيًا عند https).
+- مدة الجلسة: 14 يوم.
+- SECRET_KEY: يفشل صراحةً إذا كان افتراضيًا في وضع الإنتاج (FLASK_ENV=production).
+- MAX_CONTENT_LENGTH = 5MB للحماية من رفع ملفات ضخمة.
+- التحقق من امتداد الملفات المرفوعة (jpg, jpeg, png, webp, gif, pdf فقط).
+- إيصالات الدفع تُقدَّم الآن عبر مسار محمي /uploads/proof/<file>
+  (login_required + المالك أو admin فقط).
+- Rate limiting عبر Flask-Limiter:
+  * /login: 10/دقيقة
+  * /register: 8/دقيقة
+  * /forgot-password: 5/دقيقة
+  * /api/validate-player: 30/دقيقة
+- رؤوس أمان جديدة: X-Frame-Options DENY، Referrer-Policy، Permissions-Policy،
+  وStrict-Transport-Security عند https.
+- منع كاش صفحات بيانات المستخدم (/wallet, /orders, /profile, /dashboard, /admin/*).
+
+🚀 الأداء:
+- كاش ذاكرة لـ get_setting() بـ TTL 30 ثانية (يقلل ~8 استعلامات SQLite في كل request).
+- إزالة ضغط gzip اليدوي في Python (الأفضل تفويضه للـ reverse proxy).
+- بحث الألعاب صار أسرع (يستخدم cache للأسماء بدل قراءة innerText كل ضغطة).
+- اللوغو في nav بحجمه الفعلي (44px) بدل 260×95.
+
+🧰 إصلاحات وظيفية:
+- إصلاح /sitemap.xml (كان يخرج \n حرفي بدل سطور حقيقية) + إضافة كل صفحات الألعاب.
+- توحيد مسارات /legacy/* في redirect واحد عام (301) إلى الروابط النظيفة.
+- خيار جديد في الإعدادات: "إعادة الرصيد تلقائيًا عند فشل المزود" (auto_refund_on_failure).
+- إضافة logging مع مستويات (INFO/WARNING/ERROR/EXCEPTION) بدل print.
+- إصلاح bug سابق: استخدام pathlib.Path بدون استيراد.
+- منع IDOR على إيصالات الدفع.
+
+🎨 تصميم/UX:
+- خط hero h1 أصغر على الموبايل: clamp(28px, 7vw, 48px).
+- بطاقات الألعاب أقل طولاً (aspect-ratio 4/5 بدل 3/4).
+- زر تبديل اللغة انتقل داخل قائمة الـ nav (لا زاوية عائمة بعد الآن).
+- رسائل flash: زر إغلاق × + animation + اختفاء تلقائي بعد 6 ثوانٍ.
+- أيقونات الدعم العائمة بشكل ملوّن واضح بأيقونات SVG.
+
+📦 نشر:
+- requirements.txt محدّث (Flask-WTF, Flask-Limiter, gunicorn).
+- ملف wsgi.py جديد + Procfile للنشر بـ gunicorn.
+- .gitignore جديد.
+
+🔧 خطوات التحديث:
+1) خذ نسخة احتياطية من data/site.db و .env.
+2) فك ضغط V35 فوق ملفات مشروعك (احفظ data/ و .env).
+3) ثبّت المتطلبات: pip install -r requirements.txt
+4) شغّل التطبيق:
+   - تطوير:    python app.py
+   - إنتاج:    gunicorn wsgi:application -w 3 -b 0.0.0.0:5000
+
+⚠ ملاحظات مهمة:
+- إذا كان لديك إيصالات قديمة محفوظة بمسار /static/uploads/...، ستبقى تعمل،
+  لكن الجديدة تُحفظ بمسار /uploads/proof/... المحمي. لا تحذف القديمة يدوياً.
+- إذا كنت تستخدم Cloudflare/Nginx فعّل ضغط gzip/brotli هناك.
+- غيّر ADMIN_PASSWORD من .env فوراً إذا كان لا يزال admin123456.

@@ -1,0 +1,9 @@
+V37 applied:
+- Removed all floating support elements from templates and CSS; footer-only support remains.
+- Added/strengthened CSP/security headers.
+- Added safe_next_url to prevent open redirect.
+- Added minimum password length helper/checks.
+- Added database index helper.
+- Added favicon/logo-32 and og:image + JSON-LD.
+- Added atomic balance deduction patch where matching create_order pattern exists.
+Manual verification still recommended for create_order due to prior version differences.

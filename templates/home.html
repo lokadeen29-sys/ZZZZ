@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block content %}
+
+{# ═════════════════════ HERO — exact port of design/index.tsx ═════════════════════ #}
+<section class="v60-hero">
+  <div class="v60-hero-bg-grid" aria-hidden="true"></div>
+  {# V60.1 perf: hero background image is decorative — deferred + low fetch
+     priority so it never blocks LCP on mobile (which doesn't need a 200KB
+     bg image to feel premium). #}
+  <img class="v60-hero-bg-img" aria-hidden="true"
+       src="{{ url_for('static', filename='img/games-neon/hero-gaming.jpg') }}"
+       alt="" width="1920" height="1080" loading="lazy" decoding="async" fetchpriority="low">
+  <div class="v60-hero-bg-fade" aria-hidden="true"></div>
+
+  <div class="v60-hero-inner">
+    <div class="v60-anim-fade-up">
+      <div class="v60-hero-pill">
+        <span class="dot" aria-hidden="true"></span>
+        {{ "Instant delivery · 200+ games" if is_en else "تسليم فوري · أكثر من 200 لعبة" }}
+      </div>
+
+      <h1 class="v60-hero-title">
+        {% if is_en %}
+          Top up.<br>Play.<br><span>Win.</span>
+        {% else %}
+          اشحن.<br>العب.<br><span>انتصر.</span>
+        {% endif %}
+      </h1>
+
+      <p class="v60-hero-desc">
+        {{ "The #1 top-up platform for Arab gamers. UC, diamonds, gems and V-Bucks at the lowest prices, delivered in seconds." if is_en
+           else "منصة الشحن الأولى للاعبين العرب. شدات، جواهر، UC، وV-Bucks بأرخص الأسعار وتسليم خلال ثوانٍ." }}
+      </p>
+
+      <div class="v60-hero-actions">
+        {# V61: hero primary CTA now goes straight to the wallet top-up page —
+           the previous "ابدأ الشحن" jumped to #games which surprised users
+           who actually wanted to top up their balance. #}
+        <a href="{% if current_user %}{{ url_for('wallet') }}{% else %}{{ url_for('auth.login', next=url_for('wallet')) }}{% endif %}"
+           class="v60-btn v60-btn-primary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2H5a2 2 0 0 1-2-2z"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2"/><path d="M17 14h.01"/></svg>
+          {{ "Top up wallet" if is_en else "اشحن محفظتك" }}
+        </a>
+        <a href="#games" class="v60-btn v60-btn-glass">
+          {{ "Browse games" if is_en else "تصفح الألعاب" }}
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
+        </a>
+      </div>
+
+      <div class="v60-hero-stats">
+        <div>
+          <span class="v60-hero-stat-num">500K+</span>
+          <span class="v60-hero-stat-label">{{ "Players" if is_en else "لاعب" }}</span>
+        </div>
+        <div>
+          <span class="v60-hero-stat-num">{{ games_count or '200' }}+</span>
+          <span class="v60-hero-stat-label">{{ "Games" if is_en else "لعبة" }}</span>
+        </div>
+        <div>
+          <span class="v60-hero-stat-num">4.9★</span>
+          <span class="v60-hero-stat-label">{{ "Rating" if is_en else "تقييم" }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="v60-hero-card v60-anim-float" aria-hidden="true">
+      <div class="v60-hero-card-glow"></div>
+      <div class="v60-hero-card-frame">
+        {# Use the first featured game image if available, else fall back to PUBG asset shipped with the design. #}
+        {% set _hero_game = featured_games[0] if featured_games and featured_games|length > 0 else None %}
+        {% if _hero_game %}
+          <img src="{{ game_image(_hero_game) }}" alt="{{ _hero_game.name }}" width="600" height="800" loading="lazy" decoding="async">
+        {% else %}
+          <img src="{{ url_for('static', filename='img/games-neon/game-pubg.jpg') }}" alt="PUBG Mobile" width="600" height="800" loading="lazy" decoding="async">
+        {% endif %}
+        <div class="v60-hero-card-fade"></div>
+        <div class="v60-hero-card-info">
+          <span class="v60-hot-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67z"/></svg>
+            {{ "Most charged" if is_en else "الأكثر شحناً" }}
+          </span>
+          <h3>{{ _hero_game.name if _hero_game else "PUBG Mobile" }}</h3>
+          <p>{{ "From small to mega packs" if is_en else "من 60 UC إلى 8100 UC" }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ═════════════════════ MARQUEE ═════════════════════ #}
+<div class="v60-marquee" aria-hidden="true">
+  <div class="v60-marquee-track">
+    {% set _ar_items = ["شحن فوري","أرخص الأسعار","دعم 24/7","دفع آمن","خصم على الشحنة الأولى","تسليم بثوانٍ"] %}
+    {% set _en_items = ["Instant top-up","Lowest prices","24/7 support","Secure payment","First-order discount","Delivered in seconds"] %}
+    {% set _items = _en_items if is_en else _ar_items %}
+    {% for _r in range(3) %}
+      {% for it in _items %}
+        <div class="v60-marquee-item">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--neon-2)" aria-hidden="true"><path d="m12 3 1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg>
+          <span>{{ it }}</span>
+        </div>
+      {% endfor %}
+    {% endfor %}
+  </div>
+</div>
+
+{# ═════════════════════ POPULAR GAMES ═════════════════════ #}
+{% include "_popular_games.html" %}
+
+{# ═════════════════════ FEATURES — لماذا نِيّون ═════════════════════ #}
+<section class="v60-section" id="features">
+  <div class="v60-container">
+    <div style="text-align:center;margin-bottom:3rem">
+      <span class="v60-section-tag">// {{ "Why TecnoGems" if is_en else "لماذا تكنوجيمز" }}</span>
+      <h2 class="v60-section-title">
+        {% if is_en %}The <span>best</span> top-up experience{% else %}التجربة <span>الأفضل</span> في الشحن{% endif %}
+      </h2>
+    </div>
+    <div class="v60-features-grid">
+      {% set _features = [
+        {"title": ("Instant delivery" if is_en else "تسليم فوري"),
+         "desc":  ("Your credit lands in your account within seconds." if is_en else "خلال ثوانٍ من الدفع، رصيدك في حسابك"),
+         "svg":   '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>'},
+        {"title": ("100% secure payment" if is_en else "دفع آمن 100%"),
+         "desc":  ("Bank-grade encryption and certified gateways." if is_en else "تشفير بنكي وبوابات معتمدة عالمياً"),
+         "svg":   '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>'},
+        {"title": ("24/7 Arabic support" if is_en else "دعم 24/7"),
+         "desc":  ("A friendly support team available all day, every day." if is_en else "فريق دعم متاح طوال الوقت بالعربي"),
+         "svg":   '<circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>'},
+        {"title": ("Lowest prices" if is_en else "أرخص الأسعار"),
+         "desc":  ("We match any competitor or refund the difference." if is_en else "نضاهي أي سعر منافس أو نسترد الفرق"),
+         "svg":   '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path><path d="M18 2H6v7a6 6 0 0 0 12 0z"></path>'}
+      ] %}
+      {% for f in _features %}
+        <div class="v60-feature">
+          <div class="v60-feature-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ f.svg|safe }}</svg>
+          </div>
+          <h3 class="v60-feature-title">{{ f.title }}</h3>
+          <p class="v60-feature-desc">{{ f.desc }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{# ═════════════════════ HOW IT WORKS — 4 STEPS ═════════════════════ #}
+<section class="v60-section" id="how-it-works">
+  <div class="v60-container">
+    <div style="text-align:center;margin-bottom:4rem">
+      <span class="v60-section-tag">// {{ "How it works" if is_en else "كيف يعمل" }}</span>
+      <h2 class="v60-section-title">
+        {% if is_en %}4 steps. <span>One minute</span>.{% else %}4 خطوات. <span>دقيقة واحدة</span>.{% endif %}
+      </h2>
+    </div>
+    <div class="v60-steps-wrap">
+      <div class="v60-steps-line" aria-hidden="true"></div>
+      {% set _steps = [
+        {"n":"01","title":("Pick your game" if is_en else "اختر لعبتك"),"desc":("Browse 200+ titles" if is_en else "تصفح أكثر من 200 لعبة"),
+         "svg":'<circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>'},
+        {"n":"02","title":("Choose a pack" if is_en else "حدد الباقة"),"desc":("Packs for every player" if is_en else "باقات تناسب جميع اللاعبين"),
+         "svg":'<path d="M20 12V8H6a2 2 0 0 1 0-4h12v4"></path><path d="M4 6v12c0 1.1.9 2 2 2h14v-4"></path><path d="M18 12a2 2 0 0 0 0 4h4v-4z"></path>'},
+        {"n":"03","title":("Pay safely" if is_en else "ادفع بأمان"),"desc":("Card, Apple Pay, or wallet" if is_en else "بطاقة، Apple Pay، أو محفظة"),
+         "svg":'<rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line>'},
+        {"n":"04","title":("Get it instantly" if is_en else "استلم فوراً"),"desc":("Credit arrives in seconds" if is_en else "رصيدك يصل خلال ثوانٍ"),
+         "svg":'<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"></path>'}
+      ] %}
+      {% for s in _steps %}
+        <div class="v60-step">
+          <div class="v60-step-orb">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ s.svg|safe }}</svg>
+            <span class="v60-step-num">{{ s.n }}</span>
+          </div>
+          <h3 class="v60-step-title">{{ s.title }}</h3>
+          <p class="v60-step-desc">{{ s.desc }}</p>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{# ═════════════════════ TESTIMONIALS ═════════════════════ #}
+{# V66: section can be hidden via admin setting `show_testimonials`,
+   and each card's name/game/text are editable from the admin panel. #}
+{% if show_testimonials %}
+<section class="v60-section" id="testimonials">
+  <div class="v60-container">
+    <div style="text-align:center;margin-bottom:3rem">
+      <span class="v60-section-tag">// {{ "Player reviews" if is_en else "آراء اللاعبين" }}</span>
+      <h2 class="v60-section-title">
+        {% if is_en %}500K+ <span>happy players</span>{% else %}+500 ألف <span>لاعب سعيد</span>{% endif %}
+      </h2>
+    </div>
+    <div class="v60-testimonials-grid">
+      {% for r in testimonials %}
+        <div class="v60-testimonial">
+          <div class="v60-testimonial-stars" aria-label="5 stars">
+            {% for _ in range(5) %}
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.8 5.8 21 7 14 2 9.3 9 8.5 12 2"/></svg>
+            {% endfor %}
+          </div>
+          <p class="v60-testimonial-text">"{{ r.text }}"</p>
+          <div class="v60-testimonial-author">
+            <span class="v60-testimonial-avatar">{{ r.name[0] if r.name else '?' }}</span>
+            <div>
+              <div class="v60-testimonial-name">{{ r.name }}</div>
+              <div class="v60-testimonial-role">{{ ("Player" if is_en else "لاعب") ~ " " ~ r.game }}</div>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{# ═════════════════════ CTA ═════════════════════ #}
+<section class="v60-section" id="cta">
+  <div class="v60-container" style="max-width:64rem">
+    <div class="v60-cta-wrap">
+      <div class="v60-cta-overlay" aria-hidden="true"></div>
+      <div class="v60-cta-inner">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--neon-2);margin:0 auto 1rem;display:block" class="v60-anim-pulse" aria-hidden="true"><path d="m12 3 1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></svg>
+        <h2 class="v60-cta-title">
+          {% if is_en %}Ready to <span>level up?</span>{% else %}جاهز ترفع <span>مستواك؟</span>{% endif %}
+        </h2>
+        <p class="v60-cta-desc">
+          {{ "Sign up now and get 10% off your first top-up — plus permanent reward points." if is_en
+             else "سجّل الآن واحصل على خصم 10% على أول عملية شحن، بالإضافة إلى نقاط مكافآت دائمة." }}
+        </p>
+        {% if current_user %}
+          <a class="v60-btn v60-btn-primary v60-cta-btn" href="{{ url_for('wallet') }}">
+            {{ "Top up now" if is_en else "ابدأ الشحن الآن" }}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
+          </a>
+        {% else %}
+          <a class="v60-btn v60-btn-primary v60-cta-btn" href="{{ url_for('auth.register') }}">
+            {{ "Create account" if is_en else "ابدأ الشحن الآن" }}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
+          </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<script src="{{ url_for('static', filename='js/pages/home.js') }}" defer nonce="{{ csp_nonce }}"></script>
+{% endblock %}

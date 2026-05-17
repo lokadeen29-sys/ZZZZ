@@ -1,0 +1,17 @@
+{
+  "name": "tecnogems-assets",
+  "private": true,
+  "version": "0.45.0",
+  "description": "V45 build pipeline for Tecnogems static assets (JS + CSS).",
+  "scripts": {
+    "build:js": "esbuild static/js/app.js --bundle --minify --sourcemap --outfile=static/js/app.min.js --target=es2018",
+    "build:css": "lightningcss --minify --bundle static/css/tecnogems.unified.css -o static/css/tecnogems.min.css",
+    "build": "npm run build:css && npm run build:js",
+    "watch:js": "esbuild static/js/app.js --bundle --sourcemap --outfile=static/js/app.min.js --watch",
+    "watch:css": "lightningcss --bundle --watch static/css/tecnogems.unified.css -o static/css/tecnogems.min.css"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "lightningcss-cli": "^1.27.0"
+  }
+}

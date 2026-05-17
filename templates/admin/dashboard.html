@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <h1>لوحة الإدارة</h1>
+  <div class="kpis">
+    <div class="kpi"><span class="muted">المستخدمون</span><strong>{{ stats.users }}</strong></div>
+    <div class="kpi"><span class="muted">الطلبات</span><strong>{{ stats.orders }}</strong></div>
+    <div class="kpi"><span class="muted">قيد التنفيذ</span><strong>{{ stats.processing }}</strong></div>
+    <div class="kpi"><span class="muted">المبيعات</span><strong>{{ "%.2f"|format(stats.revenue) }}$</strong></div>
+  </div>
+
+  {# V44: Deposits get their own prominent priority section, separated from Settings. #}
+  <div style="margin-top:24px">
+    <a class="card admin-priority-card" href="{{ url_for('admin_deposits', status='pending') }}"
+       style="display:flex;align-items:center;justify-content:space-between;gap:16px;
+              padding:22px 24px;border:2px solid hsl(var(--primary,260 80% 60%));
+              background:linear-gradient(135deg, rgba(124,58,237,.18), rgba(6,182,212,.12));
+              border-radius:18px;text-decoration:none">
+      <div>
+        <h2 style="margin:0;font-size:1.4rem">📥 طلبات شحن الرصيد</h2>
+        <p class="muted" style="margin:6px 0 0">أهم بند: راجع الطلبات المعلقة وأكّد الإيداعات.</p>
+      </div>
+      <span class="btn primary" style="white-space:nowrap">فتح الطلبات →</span>
+    </a>
+  </div>
+
+  <div class="grid three" style="margin-top:22px">
+    <a class="card" href="{{ url_for('admin_orders') }}"><h2>📦 الطلبات</h2><p class="muted">إدارة الطلبات وحالاتها</p></a>
+    <a class="card" href="{{ url_for('admin_users') }}"><h2>👥 المستخدمون</h2><p class="muted">تعديل أرصدة المستخدمين</p></a>
+    <a class="card" href="{{ url_for('admin_balances') }}"><h2>💰 أرصدة السيرفرات</h2><p class="muted">استعلام رصيد سيرفر 1 وسيرفر 2</p></a>
+    <a class="card" href="{{ url_for('admin_payment_methods') }}"><h2>💳 طرق الدفع</h2><p class="muted">تعديل العناوين والتعليمات</p></a>
+    <a class="card" href="{{ url_for('admin_games') }}"><h2>🎮 الألعاب والباقات</h2><p class="muted">صور الألعاب وترتيب الباقات</p></a>
+    <a class="card" href="{{ url_for('admin_accounting') }}"><h2>📊 الأرباح</h2><p class="muted">لوحة الأرباح والمبيعات</p></a>
+    <a class="card" href="{{ url_for('admin_settings') }}"><h2>⚙️ الإعدادات</h2><p class="muted">الإعدادات العامة (نسبة الربح، صرف الدولار…)</p></a>
+  </div>
+
+  {# V51 task B: Admin 2FA security card #}
+  <div class="card" style="margin-top:22px;padding:20px 24px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+      <div>
+        <h2 style="margin:0">🔐 المصادقة الثنائية</h2>
+        {% if current_user and current_user.totp_enabled %}
+          <p class="muted" style="margin:6px 0 0">
+            المصادقة الثنائية مفعّلة على حسابك.
+            يمكنك توليد رموز استرداد جديدة أو تعطيلها.
+          </p>
+        {% else %}
+          <p class="muted" style="margin:6px 0 0">
+            غير مفعّلة — يُوصى بشدة بتفعيلها لحماية حسابك.
+          </p>
+        {% endif %}
+      </div>
+
+      {% if current_user and current_user.totp_enabled %}
+        <details style="flex:0 0 auto">
+          <summary class="btn" style="cursor:pointer">إدارة</summary>
+          <form method="post" action="{{ url_for('admin_2fa_regenerate_backup_codes') }}"
+                style="margin-top:12px;background:rgba(255,255,255,.04);padding:12px;border-radius:10px">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label style="font-size:13px">رمز TOTP الحالي</label>
+            <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                   required placeholder="000000"
+                   style="font-family:monospace;letter-spacing:4px;text-align:center">
+            <button type="submit" class="btn" style="margin-top:8px;width:100%">
+              توليد رموز استرداد جديدة
+            </button>
+          </form>
+          <form method="post" action="{{ url_for('admin_2fa_disable') }}"
+                style="margin-top:10px;background:rgba(239,68,68,.06);padding:12px;border-radius:10px;border:1px solid rgba(239,68,68,.25)">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label style="font-size:13px">كلمة المرور</label>
+            <input name="password" type="password" required maxlength="128">
+            <label style="font-size:13px;margin-top:8px">رمز TOTP أو رمز استرداد</label>
+            <input name="code" type="text" maxlength="32" required
+                   style="font-family:monospace;letter-spacing:2px">
+            <button type="submit" class="btn" style="margin-top:10px;width:100%;background:#ef4444;color:#fff">
+              تعطيل المصادقة الثنائية
+            </button>
+          </form>
+        </details>
+      {% else %}
+        <a href="{{ url_for('admin_2fa_setup') }}" class="btn primary">تفعيل الآن</a>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="notfound-wrap">
+  <div class="notfound-code">404</div>
+  <h1 class="notfound-title">{{ "Page not found" if is_en else "الصفحة غير موجودة" }}</h1>
+  <p class="muted">{{ "The page you're looking for doesn't exist or has been moved." if is_en else "الصفحة التي تبحث عنها غير موجودة أو تم نقلها." }}</p>
+  <div class="notfound-actions">
+    <a href="{{ url_for('home') }}" class="btn primary">{{ "🏠 Go Home" if is_en else "🏠 الصفحة الرئيسية" }}</a>
+    {% if current_user %}
+    <a href="{{ url_for('orders') }}" class="btn">{{ "📦 My Orders" if is_en else "📦 طلباتي" }}</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

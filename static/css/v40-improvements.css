@@ -1,0 +1,408 @@
+/* ===================================================
+   TecnoGems V40 — Full UX & Design Improvements
+   =================================================== */
+
+/* --- 1. Auth Forms: show/hide password, validation --- */
+.pw-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pw-wrap input {
+  flex: 1;
+  padding-inline-end: 44px !important;
+}
+.pw-toggle {
+  position: absolute;
+  inset-inline-end: 10px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  transition: color .18s;
+}
+.pw-toggle:hover { color: hsl(var(--primary)); }
+
+.field-error {
+  display: block;
+  font-size: 12px;
+  color: #ef4444;
+  margin-top: 4px;
+  min-height: 16px;
+}
+.input-err {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 2px rgba(239,68,68,.18) !important;
+}
+
+/* Password strength bar */
+.pw-strength-bar {
+  height: 4px;
+  background: hsl(var(--border));
+  border-radius: 99px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+#pw-strength-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 99px;
+  transition: width .3s ease, background .3s ease;
+}
+.pw-strength-text {
+  font-size: 11px;
+  margin-top: 3px;
+  display: block;
+}
+
+/* --- 2. Checkout Improvements --- */
+.checkout-card { max-width: 480px; margin: 32px auto; }
+
+.checkout-game-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: hsl(var(--card));
+  border-radius: 16px;
+  border: 1px solid hsl(var(--border));
+  margin-bottom: 20px;
+}
+.checkout-game-img {
+  width: 60px;
+  height: 60px;
+  border-radius: 12px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.checkout-game-name { font-weight: 900; font-size: 16px; }
+.checkout-pkg-name { color: hsl(var(--muted-foreground)); font-size: 13px; margin-top: 4px; }
+
+.checkout-summary {
+  background: hsl(var(--card)/.7);
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+.checkout-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  padding: 6px 0;
+  border-bottom: 1px solid hsl(var(--border)/.5);
+}
+.checkout-summary-row:last-child { border-bottom: 0; }
+.checkout-price { color: hsl(var(--accent)); font-size: 16px; }
+.balance-ok { color: #22c55e; }
+.balance-low { color: #ef4444; }
+.balance-after { color: hsl(var(--muted-foreground)); font-size: 13px; }
+.checkout-insufficient {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(239,68,68,.12);
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: 10px;
+  font-size: 13px;
+  color: #fca5a5;
+}
+.checkout-insufficient a { color: hsl(var(--accent)); font-weight: 700; }
+
+/* --- 3. Orders Page --- */
+.orders-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.orders-filter {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid hsl(var(--border));
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: .18s;
+}
+.filter-btn:hover { background: hsl(var(--foreground)/.07); color: hsl(var(--foreground)); }
+.filter-btn.active {
+  background: hsl(var(--primary));
+  color: #fff;
+  border-color: transparent;
+}
+
+.orders-list { display: flex; flex-direction: column; gap: 12px; }
+.order-card {
+  background: hsl(var(--card)/.85);
+  border: 1px solid hsl(var(--border));
+  border-radius: 18px;
+  padding: 16px 18px;
+  transition: border-color .2s;
+}
+.order-card:hover { border-color: hsl(var(--primary)/.4); }
+.order-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.order-game-info { display: flex; flex-direction: column; gap: 3px; }
+.order-game-name { font-weight: 900; font-size: 15px; }
+.order-pkg { font-size: 13px; color: hsl(var(--muted-foreground)); }
+.order-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.order-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.order-code-wrap { display: flex; align-items: center; gap: 6px; }
+.order-code {
+  background: hsl(var(--foreground)/.08);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-family: monospace;
+}
+.copy-btn {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  padding: 2px;
+  transition: color .18s;
+  display: flex;
+}
+.copy-btn:hover { color: hsl(var(--accent)); }
+.order-player { font-size: 12px; color: hsl(var(--muted-foreground)); }
+.order-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.order-price { font-weight: 900; color: hsl(var(--accent)); font-size: 14px; }
+.order-date { font-size: 11px; color: hsl(var(--muted-foreground)); }
+
+/* Order status badges */
+.order-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.s-completed  { background: rgba(34,197,94,.15);  color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
+.s-rejected   { background: rgba(239,68,68,.15);  color: #f87171; border: 1px solid rgba(239,68,68,.3); }
+.s-processing { background: rgba(59,130,246,.15); color: #93c5fd; border: 1px solid rgba(59,130,246,.3); }
+.s-waiting    { background: rgba(234,179,8,.15);  color: #fde047; border: 1px solid rgba(234,179,8,.3); }
+.s-pending    { background: hsl(var(--border));   color: hsl(var(--muted-foreground)); border: 1px solid hsl(var(--border)); }
+
+/* --- 4. Hero CSS background (replaces missing image) --- */
+.tg-hero { position: relative; overflow: hidden; border-radius: 0 0 34px 34px;
+  margin-inline: calc(50% - 50vw); padding: 0 calc(50vw - 50%);
+  min-height: 530px; display: grid; place-items: center; text-align: center; }
+.tg-hero-bg { position: absolute; inset: 0; z-index: -1; }
+.tg-hero-bg img { width: 100%; height: 100%; object-fit: cover; opacity: .52; }
+.tg-hero-bg-gradient {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, hsl(270 80% 35% / .9), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 100%, hsl(190 100% 30% / .5), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 20% 80%, hsl(280 90% 25% / .45), transparent 50%),
+    hsl(var(--background));
+}
+
+/* Hero stats */
+.tg-hero-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 18px 0;
+  background: hsl(var(--foreground)/.06);
+  border: 1px solid hsl(var(--border)/.6);
+  border-radius: 999px;
+  padding: 10px 24px;
+  backdrop-filter: blur(12px);
+  display: inline-flex;
+}
+.tg-hero-stat { text-align: center; padding: 0 18px; }
+.tg-hero-stat-num { display: block; font-size: 22px; font-weight: 900; color: hsl(var(--foreground)); }
+.tg-hero-stat-label { font-size: 11px; color: hsl(var(--muted-foreground)); }
+.tg-hero-stat-divider { width: 1px; height: 36px; background: hsl(var(--border)); }
+
+/* --- 5. Skeleton loading for products --- */
+.tg-products-skeleton .product-card {
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .6; }
+}
+
+/* --- 6. Breadcrumb --- */
+.tg-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.tg-breadcrumb a { color: hsl(var(--primary)); }
+.tg-breadcrumb a:hover { text-decoration: underline; }
+
+/* --- 7. Back to top button --- */
+.back-to-top {
+  position: fixed;
+  bottom: 90px;
+  inset-inline-end: 18px;
+  z-index: 500;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(16px);
+  pointer-events: none;
+  transition: opacity .25s, transform .25s;
+  box-shadow: 0 4px 16px rgba(0,0,0,.3);
+}
+.back-to-top.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.back-to-top:hover { background: hsl(var(--primary)); border-color: transparent; }
+
+/* --- 8. Recent orders on home --- */
+.tg-recent-orders {
+  background: hsl(var(--card)/.7);
+  border: 1px solid hsl(var(--border));
+  border-radius: 20px;
+  padding: 18px 20px;
+  margin: 24px 0;
+}
+.tg-recent-title { font-size: 15px; font-weight: 900; margin: 0 0 12px; }
+.tg-recent-list { display: flex; flex-direction: column; gap: 8px; }
+.tg-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: hsl(var(--foreground)/.04);
+  flex-wrap: wrap;
+}
+.tg-recent-game { font-weight: 700; font-size: 13px; }
+.tg-recent-pkg { font-size: 12px; color: hsl(var(--muted-foreground)); flex: 1; }
+.tg-recent-all {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: hsl(var(--primary));
+}
+
+/* --- 9. 404 page --- */
+.notfound-wrap {
+  text-align: center;
+  padding: 80px 20px;
+}
+.notfound-code {
+  font-size: clamp(80px, 18vw, 140px);
+  font-weight: 900;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+.notfound-title { font-size: 28px; font-weight: 900; margin-bottom: 8px; }
+.notfound-actions { display: flex; justify-content: center; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
+
+/* --- 10. Logout modal --- */
+.logout-modal-box {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: 20px;
+  padding: 28px 32px;
+  max-width: 360px;
+  width: 90%;
+  text-align: center;
+}
+.logout-modal-box h3 { font-size: 20px; margin: 0 0 10px; }
+.logout-modal-box p { color: hsl(var(--muted-foreground)); margin: 0 0 22px; }
+.logout-modal-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* --- 11. Nav mobile improvements --- */
+@media (max-width: 860px) {
+  .tg-links a::before { margin-inline-end: 2px; }
+}
+
+/* --- 12. PWA meta --- */
+@media (display-mode: standalone) {
+  .tg-nav { padding-top: env(safe-area-inset-top); }
+}
+
+/* ===== V40.1 hardening ===== */
+/* Force-hide all legacy floating support buttons (footer-only contacts). */
+.tg-support-stack,
+.tg-support-fab,
+.tg-support-floating,
+.tg-contact-stack,
+.tg-contact-float {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Make sure the eye toggle is always visible above any inherited button styles. */
+.pw-wrap { position: relative !important; display: flex !important; align-items: center !important; }
+.pw-wrap > input {
+  width: 100% !important;
+  padding-inline-end: 46px !important;
+}
+.pw-toggle {
+  position: absolute !important;
+  inset-inline-end: 8px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  width: 34px !important;
+  height: 34px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: hsl(var(--muted-foreground)) !important;
+  cursor: pointer !important;
+  z-index: 5 !important;
+}
+.pw-toggle:hover { color: hsl(var(--primary)) !important; }
+.pw-toggle svg { width: 20px; height: 20px; pointer-events: none; }

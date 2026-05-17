@@ -1,0 +1,119 @@
+# V51 task C — Continuous Integration for TecnoGems.
+#
+# Jobs:
+#   1. tests    — pytest suite on Python 3.11 (matches production runtime)
+#   2. bandit   — static security analysis for Python sources (medium+ severity)
+#   3. pip_audit — CVE scan against the pinned requirements.txt
+#
+# Keep this file minimal and fast: the whole pipeline should finish in under
+# three minutes on a fresh runner, so every PR gets same-day feedback.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: pytest (py3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      # Satisfy app.py import-time guards.
+      FLASK_ENV: development
+      SECRET_KEY: ci-secret-ci-secret-ci-secret-ci-secret-ci-secret-ci-secret
+      ADMIN_EMAIL: admin@test.local
+      ADMIN_PASSWORD: TestAdminPass123!
+      BASE_URL: http://localhost
+      PYTHONDONTWRITEBYTECODE: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest -ra
+
+  bandit:
+    name: bandit (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install "bandit==1.7.10"
+
+      # -ll   → report MEDIUM + HIGH severity only (ignores LOW noise)
+      # -ii   → require MEDIUM + HIGH confidence
+      # Excludes test fixtures (tests/) and the tooling dir.
+      - name: Run bandit
+        run: |
+          bandit -r . \
+            -ll -ii \
+            --exclude ./tests,./tools,./.git,./translations,./static,./templates
+
+  pip_audit:
+    name: pip-audit (CVE scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory-only: surfaces CVEs in pinned deps without blocking PRs. A
+    # follow-up task (dependency bump PR) will drive this to strict. Until
+    # then we want visibility, not a red merge button.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install "pip-audit==2.7.3"
+
+      # --no-deps + --disable-pip: requirements.txt is fully pinned with ==,
+      # so we don't need pip-audit to spin up an ephemeral venv. This is
+      # both faster and more deterministic.
+      - name: Run pip-audit on requirements.txt
+        run: pip-audit -r requirements.txt --no-deps --disable-pip

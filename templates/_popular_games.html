@@ -1,0 +1,136 @@
+{# V60 NEON: Popular games grid — exact card style ported from
+   game-charger-hub-main / src/routes/index.tsx (3:4 cover, hot badge,
+   neon glass body, "اشحن الآن" CTA). #}
+<section class="v60-section" id="games">
+  <div class="v60-container">
+    <div class="v60-games-head">
+      <div>
+        <span class="v60-section-tag">// {{ "Most charged games" if is_en else "أكثر الألعاب طلباً" }}</span>
+        <h2 class="v60-section-title">
+          {% if is_en %}Top up your <span>favorite</span> game{% else %}اشحن لعبتك <span>المفضلة</span>{% endif %}
+        </h2>
+      </div>
+      <label class="v60-search">
+        <input id="gameSearch" type="search" placeholder="{{ ('Search a game...' if is_en else 'ابحث عن لعبة...') }}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </label>
+    </div>
+
+    {# V65: "الأكثر طلباً" horizontal-scroll carousel — small design addition
+       ported from neon-gaming-topup-updated/src/routes/index.tsx. Shows the
+       top featured games as a swipeable strip above the main grid.
+       V66: now toggleable via admin setting `show_popular_bar` (default ON). #}
+    {% if show_popular_bar and featured_games and featured_games|length >= 4 %}
+      <div class="v60-featured-row">
+        <div class="v60-featured-row-head">
+          <h3>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67z"/></svg>
+            {{ "Most popular" if is_en else "الأكثر طلباً" }}
+          </h3>
+          <span class="v60-featured-row-hint">{{ "Swipe →" if is_en else "اسحب للجانب →" }}</span>
+        </div>
+        <div class="v60-featured-track">
+          {% for g in featured_games[:8] %}
+            <a class="v60-featured-card"
+               href="{{ url_for('products', provider=g.provider, game_key=g.game_key) }}"
+               aria-label="{{ g.name }}">
+              <div class="v60-featured-cover">
+                <img src="{{ game_image(g) }}" alt="{{ g.name }}" loading="lazy" decoding="async" width="600" height="800">
+                <div class="v60-featured-fade"></div>
+                <span class="v60-featured-badge">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15 8.5 22 9.3 17 14 18.2 21 12 17.8 5.8 21 7 14 2 9.3 9 8.5 12 2"/></svg>
+                  {{ "Featured" if is_en else "مميز" }}
+                </span>
+                <div class="v60-featured-info">
+                  <h4>{{ g.name }}</h4>
+                  <span>
+                    {% if g.min_price and g.min_price > 0 %}
+                      {{ ("From" if is_en else "من") }} {{ product_price({'sell_price': g.min_price}) }}
+                    {% else %}
+                      {{ "Instant top-up" if is_en else "تسليم فوري" }}
+                    {% endif %}
+                  </span>
+                </div>
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="v60-games-grid" id="games-grid">
+      {% for g in featured_games %}
+        <a class="v60-game-card searchable-game"
+           data-name="{{ g.name|lower }}"
+           href="{{ url_for('products', provider=g.provider, game_key=g.game_key) }}"
+           aria-label="{{ g.name }}">
+          <div class="v60-game-cover">
+            <img src="{{ game_image(g) }}" alt="{{ g.name }}"
+                 loading="{% if loop.index <= 6 %}eager{% else %}lazy{% endif %}"
+                 fetchpriority="{% if loop.index <= 4 %}high{% else %}auto{% endif %}"
+                 decoding="async" width="600" height="800">
+            <div class="v60-game-cover-fade"></div>
+            {% if loop.index <= 3 %}
+              <span class="v60-hot-badge" title="{{ 'Hot' if is_en else 'رائج' }}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67z"/></svg>
+                {{ "Hot" if is_en else "رائج" }}
+              </span>
+            {% endif %}
+          </div>
+          <div class="v60-game-body">
+            <div class="v60-game-row">
+              <h3 class="v60-game-title">{{ g.name }}</h3>
+              <span class="v60-game-tag">{{ g.product_count or 0 }} {{ "packs" if is_en else "باقة" }}</span>
+            </div>
+            <div class="v60-game-row" style="padding-top:0.4rem">
+              {% if g.min_price and g.min_price > 0 %}
+                <span class="v60-game-price">{{ ("From" if is_en else "من") }} {{ product_price({'sell_price': g.min_price}) }}</span>
+              {% else %}
+                <span class="v60-game-price">{{ "Instant top-up" if is_en else "تسليم فوري" }}</span>
+              {% endif %}
+              <span class="v60-game-cta">
+                {{ "Top up" if is_en else "اشحن الآن" }}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
+              </span>
+            </div>
+          </div>
+        </a>
+      {% else %}
+        <p class="empty-state" style="grid-column:1/-1">{{ "No games available yet." if is_en else "لا توجد ألعاب متاحة حالياً." }}</p>
+      {% endfor %}
+    </div>
+
+    <div id="no-games-msg" class="empty-state" style="display:none">{{ "No games found." if is_en else "لا توجد نتائج." }}</div>
+
+    {% if has_more_games %}
+      <div style="text-align:center;margin-top:2.4rem">
+        <a href="{{ url_for('all_games') }}" class="v60-btn v60-btn-glass">
+          {{ "View all games" if is_en else "عرض جميع الألعاب" }}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
+        </a>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function(){
+  var input = document.getElementById('gameSearch');
+  if (!input) return;
+  var cards = Array.from(document.querySelectorAll('.searchable-game'));
+  var names = cards.map(function(c){ return (c.getAttribute('data-name') || '').toLowerCase(); });
+  var empty = document.getElementById('no-games-msg');
+  input.addEventListener('input', function(){
+    var q = this.value.trim().toLowerCase();
+    var visible = 0;
+    cards.forEach(function(c, i){
+      var show = !q || names[i].indexOf(q) !== -1;
+      c.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    if (empty) empty.style.display = visible ? 'none' : 'block';
+  });
+})();
+</script>

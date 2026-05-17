@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="legal-page" dir="rtl" lang="ar">
+  <h1>{{ "Contact Us" if is_en else "اتصل بنا" }}</h1>
+
+  {% if is_en %}
+  <section>
+    <p>Have a question, issue, or suggestion? Reach out to us through any of the following channels. Our support team is available to help you.</p>
+  </section>
+
+  <section>
+    <h2>Support Channels</h2>
+    <div class="contact-channels">
+      {% if whatsapp_number %}
+      <div class="contact-card">
+        <h3>WhatsApp</h3>
+        <p>Chat with us directly for fast support.</p>
+        <a href="https://wa.me/{{ whatsapp_number }}" target="_blank" rel="noopener" class="btn primary">Open WhatsApp</a>
+      </div>
+      {% endif %}
+
+      {% if telegram_username %}
+      <div class="contact-card">
+        <h3>Telegram</h3>
+        <p>Send us a message on Telegram.</p>
+        <a href="https://t.me/{{ telegram_username }}" target="_blank" rel="noopener" class="btn primary">Open Telegram</a>
+      </div>
+      {% endif %}
+
+      <div class="contact-card">
+        <h3>Email</h3>
+        <p>For formal inquiries and account issues.</p>
+        <a href="mailto:support@tecnogems.com" class="btn primary">support@tecnogems.com</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Response Times</h2>
+    <ul>
+      <li><strong>WhatsApp & Telegram:</strong> Usually within minutes during business hours.</li>
+      <li><strong>Email:</strong> Within 24 hours.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Before Contacting Support</h2>
+    <p>To help us resolve your issue faster, please include:</p>
+    <ul>
+      <li>Your account email or username.</li>
+      <li>Order number (if applicable).</li>
+      <li>A clear description of the issue.</li>
+    </ul>
+  </section>
+
+  {% else %}
+
+  <section>
+    <p>لديك سؤال أو مشكلة أو اقتراح؟ تواصل معنا عبر أي من القنوات التالية. فريق الدعم لدينا جاهز لمساعدتك.</p>
+  </section>
+
+  <section>
+    <h2>قنوات الدعم</h2>
+    <div class="contact-channels">
+      {% if whatsapp_number %}
+      <div class="contact-card">
+        <h3>واتساب</h3>
+        <p>تحدث معنا مباشرة للحصول على دعم سريع.</p>
+        <a href="https://wa.me/{{ whatsapp_number }}" target="_blank" rel="noopener" class="btn primary">فتح واتساب</a>
+      </div>
+      {% endif %}
+
+      {% if telegram_username %}
+      <div class="contact-card">
+        <h3>تيليجرام</h3>
+        <p>أرسل لنا رسالة على تيليجرام.</p>
+        <a href="https://t.me/{{ telegram_username }}" target="_blank" rel="noopener" class="btn primary">فتح تيليجرام</a>
+      </div>
+      {% endif %}
+
+      <div class="contact-card">
+        <h3>البريد الإلكتروني</h3>
+        <p>للاستفسارات الرسمية ومشاكل الحسابات.</p>
+        <a href="mailto:support@tecnogems.com" class="btn primary">support@tecnogems.com</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>أوقات الرد</h2>
+    <ul>
+      <li><strong>واتساب وتيليجرام:</strong> عادةً خلال دقائق أثناء ساعات العمل.</li>
+      <li><strong>البريد الإلكتروني:</strong> خلال 24 ساعة.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>قبل التواصل مع الدعم</h2>
+    <p>لمساعدتنا في حل مشكلتك بسرعة، يرجى تضمين:</p>
+    <ul>
+      <li>البريد الإلكتروني أو اسم المستخدم الخاص بحسابك.</li>
+      <li>رقم الطلب (إن وُجد).</li>
+      <li>وصف واضح للمشكلة.</li>
+    </ul>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

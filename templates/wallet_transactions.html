@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <div class="page-head">
+    <div>
+      <h1>{{ t("wallet_records") }}</h1>
+      <p class="muted">تابع حالة طلبات {{ t("topup_wallet") }}: بانتظار، {{ t("completed") }}، أو {{ t("rejected") }}.</p>
+    </div>
+    <a class="btn primary" href="{{ url_for('wallet') }}#deposit-card">{{ t("topup_wallet") }}</a>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>رقم الطلب</th>
+          <th>{{ t("amount") }}</th>
+          <th>المبلغ المضاف للمحفظة</th>
+          <th>{{ t("payment_method") }}</th>
+          <th>{{ t("status") }}</th>
+          <th>{{ t("date") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for d in deposits %}
+        <tr>
+          <td>{{ d.deposit_code }}</td>
+          <td>
+            {{ "%.2f"|format(d.amount) }}
+            {% if d.currency == "SYP" %}ل.س{% else %}${% endif %}
+          </td>
+          {# V49-HOTFIX: see admin/deposits.html — pass amount_usd, not amount. #}
+          <td>{{ wallet_money(d.amount_usd or 0) }}</td>
+          <td>{{ d.method }}</td>
+          <td>
+            {% if d.status == 'approved' %}
+              <span class="status completed">{{ t("completed") }}</span>
+            {% elif d.status == 'rejected' %}
+              <span class="status rejected">{{ t("rejected") }}</span>
+            {% else %}
+              <span class="status pending">{{ t("waiting") }}</span>
+            {% endif %}
+          </td>
+          <td>{{ d.created_at|syria_time }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="muted">لا توجد طلبات رصيد بعد.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
