@@ -1,4 +1,4 @@
-"""V53 REFACTOR (phase 1): auth routes extracted from app.py.
+"""V53 REFACTOR (phases 1 & 2): auth routes extracted from app.py.
 
 This Blueprint owns every route that deals with authentication:
   GET/POST /login
@@ -8,8 +8,9 @@ This Blueprint owns every route that deals with authentication:
   GET/POST /resend-verification
   GET/POST /forgot-password
   GET/POST /reset-password/<token>
-  GET      /auth/google
-  GET      /auth/google/callback
+  GET      /confirm-email-change/<token>          (phase 2)
+  GET      /auth/google                            (phase 2: oauth client from oauth_bp)
+  GET      /auth/google/callback                   (phase 2: oauth client from oauth_bp)
 
 Endpoint names live under the `auth.` namespace, e.g. url_for("auth.login").
 
@@ -49,7 +50,9 @@ from app import (
     MAX_PHONE_LEN,
     app as _flask_app,
     authenticate,
+    confirm_pending_email_change,
     create_user,
+    current_user,
     email_verification_is_enabled,
     get_real_ip,
     get_setting,
@@ -67,8 +70,6 @@ from app import (
     validate_password_strength,
     verify_user_email,
 )
-# Google OAuth helpers are namespaced in app.py
-import app as _app_module
 
 # Pre-wired DB helpers for Google OAuth
 from database import (
@@ -383,22 +384,43 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
+# /confirm-email-change/<token>
+# ---------------------------------------------------------------------------
+@bp.route("/confirm-email-change/<token>")
+def confirm_email_change(token):
+    ok, error = confirm_pending_email_change(token)
+    if ok:
+        flash("تم تغيير البريد الإلكتروني بنجاح", "success")
+    else:
+        flash(error or "تعذر تغيير البريد", "danger")
+    # If the user is logged in, send them back to their profile; otherwise
+    # to the login page. Endpoint names match the new blueprint namespacing
+    # — `auth.login` for this blueprint, `profile` (still in app.py until
+    # phase 3) for the public profile route.
+    return redirect(url_for("profile") if current_user() else url_for("auth.login"))
+
+
+# ---------------------------------------------------------------------------
 # /auth/google  +  /auth/google/callback
 # ---------------------------------------------------------------------------
 @bp.route("/auth/google")
 def auth_google_login():
-    _oauth = getattr(_app_module, "_oauth", None)
+    # V53 REFACTOR (phase 2): the Authlib OAuth client + redirect URI now
+    # live in routes/oauth_bp.py. We import lazily inside the view so the
+    # module-level import order doesn't matter (oauth_bp imports app, and
+    # auth_bp is registered alongside it).
+    from .oauth_bp import get_oauth, get_redirect_uri
+    _oauth = get_oauth()
     if not _oauth:
         flash("تسجيل الدخول بـ Google غير مفعّل حالياً", "warning")
         return redirect(url_for("auth.login"))
-    return _oauth.google.authorize_redirect(
-        getattr(_app_module, "GOOGLE_REDIRECT_URI", "")
-    )
+    return _oauth.google.authorize_redirect(get_redirect_uri())
 
 
 @bp.route("/auth/google/callback")
 def auth_google_callback():
-    _oauth = getattr(_app_module, "_oauth", None)
+    from .oauth_bp import get_oauth
+    _oauth = get_oauth()
     if not _oauth:
         return redirect(url_for("auth.login"))
     try:

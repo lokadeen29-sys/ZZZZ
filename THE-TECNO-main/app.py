@@ -1422,16 +1422,6 @@ def profile():
     return render_template("profile.html", user=user)
 
 
-@app.route("/confirm-email-change/<token>")
-def confirm_email_change(token):
-    ok, error = confirm_pending_email_change(token)
-    if ok:
-        flash("تم تغيير البريد الإلكتروني بنجاح", "success")
-    else:
-        flash(error or "تعذر تغيير البريد", "danger")
-    return redirect(url_for("profile") if current_user() else url_for("auth.login"))
-
-
 @app.route("/orders")
 @app.route("/legacy/orders")
 @login_required
@@ -2956,55 +2946,41 @@ def admin_settings():
 
 # ============================================================================
 # V43: Wishlist + Search Autocomplete REMOVED per user request.
-# Google OAuth + Service Worker remain (below).
+# V53 REFACTOR (phase 2): Google OAuth client + /sw.js service worker
+# moved to routes/oauth_bp.py. The DB helpers for the OAuth callback now
+# live in routes/auth_bp.py (and database.py, where they have always been).
+#
+# We re-export the public symbols below so any caller still doing
+# `from app import _oauth` / `GOOGLE_REDIRECT_URI` keeps working until the
+# transitional bridge is removed in phase 5. `_oauth` is a *property-like*
+# accessor (a function call returns the live instance) so that callers see
+# the post-init_oauth() value, not the None it had at import time.
 # ============================================================================
-from database import (
-    get_user_by_google_sub as _db_get_user_by_google_sub,
-    create_user_oauth as _db_create_user_oauth,
-    link_user_google_sub as _db_link_user_google_sub,
+from routes.oauth_bp import (
+    GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
+    get_oauth as _get_oauth,
 )
 
 
-# ---------------- Service Worker (root scope) ----------------
-@app.route("/sw.js")
-def service_worker():
-    resp = send_from_directory("static", "sw.js")
-    resp.headers["Service-Worker-Allowed"] = "/"
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return resp
+def __getattr__(name):
+    """PEP 562: lazy attribute lookup so `from app import _oauth` returns the
+    live OAuth client populated by init_oauth() rather than the import-time
+    placeholder. Called only when normal lookup fails.
+    """
+    if name == "_oauth":
+        return _get_oauth()
+    raise AttributeError(name)
 
 
-# ---------------- Google OAuth ----------------
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "").strip() or f"{BASE_URL}/auth/google/callback"
-
-_oauth = None
-try:
-    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
-        from authlib.integrations.flask_client import OAuth as _AuthlibOAuth
-        _oauth = _AuthlibOAuth(app)
-        _oauth.register(
-            name="google",
-            client_id=GOOGLE_CLIENT_ID,
-            client_secret=GOOGLE_CLIENT_SECRET,
-            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-            client_kwargs={"scope": "openid email profile"},
-        )
-except Exception as exc:
-    app.logger.warning("Google OAuth disabled: %s", exc)
-    _oauth = None
-
-
-@app.context_processor
-def _inject_oauth_flags():
-    return {"google_oauth_enabled": bool(_oauth)}
-
-
-# V53 REFACTOR (phase 1): /auth/google + /auth/google/callback routes have
-# moved to routes/auth_bp.py. The oauth object (_oauth) + GOOGLE_REDIRECT_URI
-# remain defined here because they must be configured at app-startup time
-# (not inside a request); the Blueprint reaches them via `import app`.
+# V53 REFACTOR (phase 2): /auth/google, /auth/google/callback, /sw.js and
+# the `google_oauth_enabled` template flag now live entirely in
+# routes/oauth_bp.py + routes/auth_bp.py. The Authlib OAuth client is wired
+# at blueprint-registration time (see routes/__init__.py -> init_oauth(app)).
+#
+# The `__getattr__` shim above keeps `from app import _oauth` working until
+# the transitional bridge is removed in phase 5.
 
 
 # PATCH-H1: exempt all /api/* JSON endpoints from CSRF.
