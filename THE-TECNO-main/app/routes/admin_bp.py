@@ -72,37 +72,41 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from app import (
-    BASE_URL,
+from app.config import BaseConfig
+from app.extensions import limiter
+from app.services.images import _sanitise_svg, process_upload_to_webp
+from app.services.mail import (
     MAIL_FROM,
     MAIL_PASSWORD,
     MAIL_PORT,
     MAIL_SERVER,
     MAIL_USERNAME,
     MAIL_USE_TLS,
-    MAX_ADMIN_BALANCE,
     _build_email_html,
-    _sanitise_svg,
     _send_email_sync,
+    email_is_configured,
+)
+from app.services.orders import enqueue_order_job
+from app.services.pricing import (
+    get_display_currency,
+    get_pricing_mode,
+    get_usd_syp_rate,
+    manual_price_edit_enabled,
+)
+from app.utils.auth import admin_required, current_user, login_required
+from app.utils.security import safe_next_url
+from app.utils.settings_cache import get_setting, set_setting
+from audit import log_audit
+from database import (
     accounting_summary,
     add_custom_game,
-    admin_required,
     create_product_group,
-    current_user,
     delete_product_group,
-    email_is_configured,
-    enqueue_order_job,
     get_deposit,
-    get_display_currency,
     get_game,
+    get_order,
     get_payment_method,
-    get_pricing_mode,
-    get_provider_balance,
-    get_real_ip,
-    get_setting,
     get_user_by_id,
-    get_usd_syp_rate,
-    limiter,
     list_all_game_groups,
     list_all_products_for_admin,
     list_deposits,
@@ -112,17 +116,10 @@ from app import (
     list_product_groups,
     list_user_deposits_admin,
     list_user_orders,
-    log,
-    log_audit,
-    login_required,
-    manual_price_edit_enabled,
-    process_upload_to_webp,
-    safe_next_url,
     search_users,
     set_game_active,
     set_game_home_sort_order,
     set_game_show_on_home,
-    set_setting,
     set_user_balance,
     stats,
     update_deposit,
@@ -136,7 +133,15 @@ from app import (
     update_profit_margin,
     user_financial_summary,
 )
-from app import get_order  # imported separately because the name collides with order_action's local var
+from providers import get_provider_balance
+from request_ip import get_real_ip
+import logging
+
+log = logging.getLogger("tecnogems.admin")
+
+# Length / dollar caps + URL constant.
+BASE_URL = BaseConfig.BASE_URL
+MAX_ADMIN_BALANCE = BaseConfig.MAX_ADMIN_BALANCE
 
 from sanitize import clean_plain_text, clean_rich_text
 

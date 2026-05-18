@@ -45,20 +45,21 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-from app import (
-    MAX_DEPOSIT_USD,
-    MAX_PROOF_TEXT_LEN,
-    _ext_ok,
-    _proof_magic_ok,
+from app.config import BaseConfig
+from app.services.images import _ext_ok, _proof_magic_ok
+from app.services.pricing import get_usd_syp_rate
+from app.utils.auth import current_user, login_required
+from app.utils.settings_cache import get_setting
+from database import (
     create_deposit,
-    current_user,
     get_payment_method,
-    get_setting,
-    get_usd_syp_rate,
     list_deposits_for_user,
     list_payment_methods,
-    login_required,
 )
+
+# Length / dollar caps — mirror the legacy app.py module-level constants.
+MAX_DEPOSIT_USD = BaseConfig.MAX_DEPOSIT_USD
+MAX_PROOF_TEXT_LEN = BaseConfig.MAX_PROOF_TEXT_LEN
 
 
 bp = Blueprint("wallet", __name__)

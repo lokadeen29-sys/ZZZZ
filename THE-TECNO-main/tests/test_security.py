@@ -68,11 +68,11 @@ class TestSafeNextUrl:
 
     @pytest.fixture()
     def home_url(self, app):
-        """Whatever `url_for('home')` resolves to inside this app — the
-        fallback value safe_next_url returns on rejection."""
+        """Whatever `url_for('public.home')` resolves to inside this app —
+        the fallback value safe_next_url returns on rejection."""
         from flask import url_for
         with app.test_request_context("/"):
-            return url_for("home")
+            return url_for("public.home")
 
     @pytest.mark.parametrize(
         "evil",
@@ -92,7 +92,7 @@ class TestSafeNextUrl:
     )
     def test_rejects_malicious(self, app, safe_next_url, home_url, evil):
         with app.test_request_context("/", query_string={"next": evil}):
-            result = safe_next_url("home")
+            result = safe_next_url("public.home")
         # Anything rejected must fall back to the home endpoint.
         assert result == home_url
 
@@ -102,11 +102,11 @@ class TestSafeNextUrl:
     )
     def test_allows_same_origin_paths(self, app, safe_next_url, good):
         with app.test_request_context("/", query_string={"next": good}):
-            assert safe_next_url("home") == good
+            assert safe_next_url("public.home") == good
 
     def test_empty_next_uses_default_endpoint(self, app, safe_next_url, home_url):
         with app.test_request_context("/"):
-            assert safe_next_url("home") == home_url
+            assert safe_next_url("public.home") == home_url
 
 
 # ---------------------------------------------------------------------------

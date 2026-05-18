@@ -54,20 +54,14 @@ from flask import (
     url_for,
 )
 
-from app import (
-    MAX_PASSWORD_LEN,
-    current_user,
-    get_real_ip,
-    get_setting,
-    limiter,
-    login_required,
-    safe_next_url,
-)
-# admin_required is also defined in app.py; re-imported by name so the
-# `@admin_required` decorator below resolves to the same callable.
-from app import admin_required
+from app.config import BaseConfig
+from app.extensions import limiter
+from app.utils.auth import admin_required, current_user, login_required
+from app.utils.security import safe_next_url
+from app.utils.settings_cache import get_setting
 
 from audit import log_audit
+from request_ip import get_real_ip
 from database import (
     authenticate,
     disable_user_totp,
@@ -85,6 +79,10 @@ from security_2fa import (
     serialize_backup_codes,
     verify_totp,
 )
+
+
+# Length cap — mirrors the legacy app.py module-level constant.
+MAX_PASSWORD_LEN = BaseConfig.MAX_PASSWORD_LEN
 
 
 bp = Blueprint("admin_2fa", __name__)

@@ -27,8 +27,8 @@ Dependencies:
 """
 from __future__ import annotations
 
-from utils.i18n import current_lang
-from utils.settings_cache import get_setting
+from app.utils.i18n import current_lang
+from app.utils.settings_cache import get_setting
 
 
 def get_pricing_mode():

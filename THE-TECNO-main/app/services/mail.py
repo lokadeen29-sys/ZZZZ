@@ -46,7 +46,7 @@ from queue import Queue
 
 from flask import render_template
 
-from utils.settings_cache import get_setting
+from app.utils.settings_cache import get_setting
 
 log = logging.getLogger("tecnogems.mail")
 

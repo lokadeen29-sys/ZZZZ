@@ -65,9 +65,40 @@ def app(tmp_path, monkeypatch):
 
     # Ensure modules can be re-imported cleanly when another test already
     # imported them with a different DB_PATH.
-    for mod in ("app", "database", "tasks", "providers", "security_2fa",
-                "sync_products", "featured_games", "request_ip",
-                "routes", "routes.auth_bp"):
+    for mod in (
+        "app",
+        "app.config",
+        "app.extensions",
+        "app.middleware",
+        "app.bootstrap",
+        "app.routes",
+        "app.routes.auth_bp",
+        "app.routes.oauth_bp",
+        "app.routes.public_bp",
+        "app.routes.wallet_bp",
+        "app.routes.admin_bp",
+        "app.routes.admin_2fa_bp",
+        "app.routes.api_bp",
+        "app.services",
+        "app.services.images",
+        "app.services.mail",
+        "app.services.pricing",
+        "app.services.orders",
+        "app.services.game_images",
+        "app.utils",
+        "app.utils.auth",
+        "app.utils.filters",
+        "app.utils.i18n",
+        "app.utils.security",
+        "app.utils.settings_cache",
+        "database",
+        "tasks",
+        "providers",
+        "security_2fa",
+        "sync_products",
+        "featured_games",
+        "request_ip",
+    ):
         sys.modules.pop(mod, None)
 
     import database  # noqa: E402 — imported after sys.modules reset

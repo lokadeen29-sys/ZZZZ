@@ -21,11 +21,21 @@ if str(_REPO_ROOT) not in sys.path:
 def _clean_app_modules():
     """Remove cached app-related modules so a fresh import re-evaluates guards."""
     for mod in list(sys.modules):
-        if mod in (
-            "app", "database", "tasks", "providers", "security_2fa",
-            "sync_products", "featured_games", "routes", "routes.lang_bp",
-            "audit", "wsgi",
-        ) or mod.startswith("routes."):
+        if (
+            mod
+            in (
+                "app",
+                "database",
+                "tasks",
+                "providers",
+                "security_2fa",
+                "sync_products",
+                "featured_games",
+                "audit",
+                "wsgi",
+            )
+            or mod.startswith("app.")
+        ):
             sys.modules.pop(mod, None)
 
 
