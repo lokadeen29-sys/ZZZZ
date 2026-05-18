@@ -1,0 +1,11 @@
+{# V53 REFACTOR (phase 1): email-change confirmation body.
+
+Rendered by services.mail.send_email_change_confirmation.
+#}
+{%- set title = "تأكيد تغيير البريد - TecnoGems" -%}
+{%- set greeting = "تأكيد تغيير البريد الإلكتروني" -%}
+{%- set message = "تلقينا طلبًا لتغيير البريد الإلكتروني المرتبط بحسابك. اضغط على الزر أدناه لتأكيد التغيير." -%}
+{%- set button_text = "تأكيد تغيير البريد" -%}
+{%- set button_url = link -%}
+{%- set footer_note = "إذا لم تطلب تغيير البريد الإلكتروني، يمكنك تجاهل هذه الرسالة." -%}
+{% include "email/base.html" %}

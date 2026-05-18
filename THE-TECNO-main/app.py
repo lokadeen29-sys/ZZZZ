@@ -42,24 +42,16 @@ from security_2fa import (
     serialize_backup_codes, deserialize_backup_codes, consume_backup_code,
 )
 
-# --- V35: in-memory settings cache (TTL 30s) to cut SQLite hits per request ---
-import time as _time
-_SETTINGS_CACHE = {}
-_SETTINGS_TTL = 30.0
-
-def get_setting(key, default=None):
-    now = _time.time()
-    hit = _SETTINGS_CACHE.get(key)
-    if hit and hit[1] > now:
-        val = hit[0]
-        return val if val is not None else default
-    val = _db_get_setting(key, default)
-    _SETTINGS_CACHE[key] = (val, now + _SETTINGS_TTL)
-    return val if val is not None else default
-
-def set_setting(key, value):
-    _SETTINGS_CACHE.pop(key, None)
-    return _db_set_setting(key, value)
+# V53 REFACTOR (phase 1): settings cache moved to utils/settings_cache.py.
+# Re-exported here so existing `from app import get_setting` callers keep
+# working until phase 5. The underlying `_db_get_setting` / `_db_set_setting`
+# imports from database.py above remain so any direct user of those names
+# in this module is unaffected.
+from utils.settings_cache import get_setting, set_setting  # noqa: E402,F401
+# Internal cache state — kept under the legacy names so the (very rare)
+# direct touchers keep working transparently.
+from utils.settings_cache import _SETTINGS_CACHE, _SETTINGS_TTL  # noqa: E402,F401
+import time as _time  # legacy alias retained for any module importing app._time
 
 from providers import create_provider_order, get_provider_balance, validate_player_provider
 # V71: للـ in-process cache الخاص بـ /api/validate-player.
@@ -249,92 +241,31 @@ try:
 except Exception as _e:
     log.warning("Flask-Compress not installed (%s). Run: pip install Flask-Compress", _e)
 
-# V43: WebP image processing on upload (Pillow)
+# V53 REFACTOR (phase 1): image upload helpers moved to services/images.py.
+# Re-exported here so existing `from app import process_upload_to_webp` etc.
+# keep working until phase 5. Pillow init (PATCH-M3 25 MP cap) now happens
+# inside the services.images module — same effect since both modules import
+# the same PIL.Image at process startup.
+from services.images import (  # noqa: E402,F401
+    ALLOWED_UPLOAD_EXTS,
+    _IMG_MAGIC,
+    _PIL_OK,
+    _PROOF_MAGIC,
+    _detect_image_kind,
+    _ext_ok,
+    _proof_magic_ok,
+    _sanitise_svg,
+    process_upload_to_webp,
+)
+# Pillow itself is also imported here so any code in this module that
+# references the bare `Image` / `ImageOps` symbols (none today, but search
+# `_PIL_OK` to be safe) keeps compiling. Failure is non-fatal — services.images
+# already logs the warning and falls back gracefully.
 try:
-    from PIL import Image, ImageOps
-    # PATCH-M3: cap decompression to prevent "image bomb" DoS
-    Image.MAX_IMAGE_PIXELS = 25_000_000  # ~25 MP, plenty for any UI image
-    _PIL_OK = True
+    from PIL import Image, ImageOps  # noqa: F401  # used transitively
 except Exception:
-    _PIL_OK = False
-    log.warning("Pillow not installed. Image auto-conversion disabled. Run: pip install Pillow")
-
-# Magic-byte signatures (real type check, not just file extension)
-_IMG_MAGIC = {
-    b"\xff\xd8\xff": "jpg",
-    b"\x89PNG\r\n\x1a\n": "png",
-    b"GIF87a": "gif",
-    b"GIF89a": "gif",
-    b"RIFF": "webp",  # WEBP starts with RIFF....WEBP
-}
-
-def _detect_image_kind(head_bytes):
-    if not head_bytes:
-        return None
-    for sig, kind in _IMG_MAGIC.items():
-        if head_bytes.startswith(sig):
-            if kind == "webp" and b"WEBP" not in head_bytes[:16]:
-                continue
-            return kind
-    return None
-
-def process_upload_to_webp(file_storage, dest_dir, base_name, max_w=1200, quality=82):
-    """
-    Read uploaded image, verify magic bytes, strip EXIF, downscale to max_w,
-    and save as WebP. Returns saved filename (e.g. "name.webp") or None on failure.
-    Falls back to plain save if Pillow is unavailable.
-    """
-    try:
-        head = file_storage.stream.read(32)
-        file_storage.stream.seek(0)
-        kind = _detect_image_kind(head)
-        if not kind:
-            return None
-        os.makedirs(dest_dir, exist_ok=True)
-        out_name = f"{base_name}.webp"
-        out_path = os.path.join(dest_dir, out_name)
-        if not _PIL_OK:
-            # Fallback: just save original under .webp-suffixed name? No — keep original ext.
-            ext = "webp" if kind == "webp" else kind
-            out_name = f"{base_name}.{ext}"
-            out_path = os.path.join(dest_dir, out_name)
-            file_storage.save(out_path)
-            return out_name
-        # PATCH-H3: verify the file is a valid, non-malicious image BEFORE
-        # decoding the full payload. Image.verify() consumes the file so we
-        # must reopen for actual processing.
-        try:
-            _verify_img = Image.open(file_storage.stream)
-            _verify_img.verify()
-        except Exception as exc:
-            log.warning("process_upload_to_webp verify failed: %s", exc)
-            return None
-        try:
-            file_storage.stream.seek(0)
-        except Exception:
-            return None
-        img = Image.open(file_storage.stream)
-        img = ImageOps.exif_transpose(img)
-        if img.mode not in ("RGB", "RGBA"):
-            img = img.convert("RGB")
-        if img.width > max_w:
-            ratio = max_w / float(img.width)
-            new_h = max(1, int(img.height * ratio))
-            # PATCH-L5: use new Resampling enum (Pillow ≥ 10) with fallback.
-            _resample = getattr(Image, "Resampling", Image).LANCZOS
-            img = img.resize((max_w, new_h), _resample)
-        save_kwargs = {"quality": quality, "method": 6}
-        if img.mode == "RGBA":
-            save_kwargs["lossless"] = False
-        img.save(out_path, "WEBP", **save_kwargs)
-        return out_name
-    except Exception as exc:
-        log.warning("process_upload_to_webp failed: %s", exc)
-        try:
-            file_storage.stream.seek(0)
-        except Exception:
-            pass
-        return None
+    Image = None  # type: ignore[assignment]
+    ImageOps = None  # type: ignore[assignment]
 
 
 # Uploads (V50 SECURITY H4): moved OUT of static/ into data/uploads/ so
@@ -357,63 +288,9 @@ if os.path.isdir(_LEGACY_UPLOADS):
     except OSError:
         pass
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-# V50.2 LOW: removed "pdf" from deposit-proof allowed extensions. PDFs
-# can embed JavaScript and are a common malware vector; images are
-# sufficient for a payment-proof screenshot and much safer to serve back.
-ALLOWED_UPLOAD_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
-
-def _ext_ok(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_UPLOAD_EXTS
-
-
-# PATCH-H4: magic-byte verification for deposit proofs (prevents file-type
-# spoofing such as evil.php renamed to evil.png).
-# V50.2 LOW: PDF removed — images only.
-_PROOF_MAGIC = {
-    b"\xff\xd8\xff": "jpg",
-    b"\x89PNG\r\n\x1a\n": "png",
-    b"GIF87a": "gif",
-    b"GIF89a": "gif",
-}
-
-def _proof_magic_ok(file_stream):
-    """Verify uploaded file's first bytes match an accepted media type.
-    Resets stream position to 0 before returning so the caller can save it."""
-    try:
-        head = file_stream.read(16)
-        file_stream.seek(0)
-    except Exception:
-        return False
-    if not head:
-        return False
-    for sig, _kind in _PROOF_MAGIC.items():
-        if head.startswith(sig):
-            return True
-    # WebP starts with RIFF....WEBP
-    if head.startswith(b"RIFF") and b"WEBP" in head[:16]:
-        return True
-    return False
-
-
-# PATCH-H1: SVG sanitiser — strips <script>, on* event handlers, and
-# javascript:/data: URIs from admin-uploaded SVGs to prevent stored XSS.
-import re as _re_svg
-
-_SVG_SCRIPT_RE = _re_svg.compile(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>", _re_svg.IGNORECASE | _re_svg.DOTALL)
-_SVG_EVENT_RE = _re_svg.compile(r"\son[a-z]+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", _re_svg.IGNORECASE)
-_SVG_JS_URI_RE = _re_svg.compile(r"(href|xlink:href|src)\s*=\s*(\"|')\s*(javascript|data):[^\"']*(\"|')", _re_svg.IGNORECASE)
-_SVG_FOREIGN_RE = _re_svg.compile(r"<\s*(foreignObject|iframe|object|embed)\b[^>]*>.*?<\s*/\s*\1\s*>", _re_svg.IGNORECASE | _re_svg.DOTALL)
-
-def _sanitise_svg(svg_text):
-    """Best-effort SVG XSS sanitiser. Removes scripts, event handlers,
-    foreignObject / iframe nodes, and javascript:/data: URLs."""
-    if not svg_text:
-        return ""
-    s = _SVG_SCRIPT_RE.sub("", svg_text)
-    s = _SVG_FOREIGN_RE.sub("", s)
-    s = _SVG_EVENT_RE.sub("", s)
-    s = _SVG_JS_URI_RE.sub(r"\1=\2#\4", s)
-    return s
+# V53 REFACTOR (phase 1): ALLOWED_UPLOAD_EXTS / _ext_ok / _PROOF_MAGIC /
+# _proof_magic_ok / _sanitise_svg now live in services/images.py and are
+# re-exported above. The original definitions used to live here.
 
 
 # Make csrf_token() always available in templates even if Flask-WTF missing
@@ -423,172 +300,44 @@ if csrf is None:
         return {"csrf_token": lambda: ""}
 
 
-MAIL_SERVER = os.getenv("MAIL_SERVER", "")
-MAIL_PORT = int(os.getenv("MAIL_PORT", "587"))
-MAIL_USE_TLS = os.getenv("MAIL_USE_TLS", "1") == "1"
-MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
-MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "").replace(" ", "").strip()
-MAIL_FROM = os.getenv("MAIL_FROM", MAIL_USERNAME or "no-reply@tecnogems.com")
-# V67 DELIVERABILITY: friendly From-name, Reply-To, and explicit envelope sender.
-# When using Gmail/Workspace SMTP, the envelope sender MUST equal the
-# authenticated mailbox or the message fails SPF alignment and lands in Spam.
-MAIL_FROM_NAME = os.getenv("MAIL_FROM_NAME", "TecnoGems").strip() or "TecnoGems"
-MAIL_REPLY_TO = os.getenv("MAIL_REPLY_TO", "").strip()
-# Domain used in Message-ID and List-Unsubscribe URLs.
-try:
-    _BASE_DOMAIN = BASE_URL.split("//", 1)[-1].split("/", 1)[0]
-except Exception:
-    _BASE_DOMAIN = "tecnogems.com"
+# V53 REFACTOR (phase 1): MAIL_* constants and _aligned_envelope_sender
+# moved to services/mail.py. Re-exported here so existing
+# `from app import MAIL_FROM, _aligned_envelope_sender` callers keep
+# working until phase 5. _BASE_DOMAIN is also re-exported.
+from services.mail import (  # noqa: E402,F401
+    BASE_URL as _MAIL_BASE_URL,  # alias to avoid shadowing app.BASE_URL
+    MAIL_FROM,
+    MAIL_FROM_NAME,
+    MAIL_PASSWORD,
+    MAIL_PORT,
+    MAIL_REPLY_TO,
+    MAIL_SERVER,
+    MAIL_USERNAME,
+    MAIL_USE_TLS,
+    _BASE_DOMAIN,
+    _aligned_envelope_sender,
+)
+del _MAIL_BASE_URL  # the app.py BASE_URL above is the canonical one
 
 
-def _aligned_envelope_sender():
-    """Return the SMTP envelope sender that aligns with the SMTP login.
-
-    Gmail / Google Workspace REWRITE the From: header to the authenticated
-    mailbox if it doesn't match. To preserve a clean From: while still
-    passing SPF/DKIM alignment, we set the SMTP-level MAIL FROM (envelope)
-    to the authenticated user. Most consumer mailbox providers honour this.
-    """
-    if MAIL_USERNAME and "@" in MAIL_USERNAME:
-        return MAIL_USERNAME
-    return MAIL_FROM
-
-
-# --- Public language system (Arabic default / English optional) ---
-PUBLIC_TRANSLATIONS = {
-    "home": {"ar": "الرئيسية", "en": "Home"},
-    "my_orders": {"ar": "طلباتي", "en": "My Orders"},
-    "wallet_records": {"ar": "سجل طلبات الرصيد", "en": "Wallet Requests"},
-    "topup_wallet": {"ar": "شحن المحفظة", "en": "Top Up Wallet"},
-    "balance": {"ar": "الرصيد", "en": "Balance"},
-    "login": {"ar": "دخول", "en": "Login"},
-    "register": {"ar": "إنشاء حساب", "en": "Create Account"},
-    "logout": {"ar": "خروج", "en": "Logout"},
-    "menu": {"ar": "القائمة", "en": "Menu"},
-    "hero_pill": {"ar": "✨ منصة شحن الألعاب الأسرع في الشرق الأوسط", "en": "✨ Fast game top-up for global players"},
-    "hero_title_1": {"ar": "اشحن لعبتك المفضلة", "en": "Top up your favorite game"},
-    "hero_title_2": {"ar": "بضغطة واحدة", "en": "in one simple step"},
-    "hero_desc": {"ar": "جواهر، شدات، نقاط CP وأكثر —", "en": "Diamonds, UC, CP and more — fast and secure."},
-    "browse_games": {"ar": "تصفح الألعاب", "en": "Browse Games"},
-    "available_now": {"ar": "🔥 المتاح الآن", "en": "🔥 Available Now"},
-    "games_sections": {"ar": "الألعاب والأقسام المتاحة", "en": "Available Games & Sections"},
-    "choose_game": {"ar": "اختر اللعبة أو القسم المناسب مباشرة.", "en": "Choose a game or section directly."},
-    "search_game": {"ar": "🔍 ابحث عن لعبة أو قسم...", "en": "🔍 Search for a game or section..."},
-    "packages": {"ar": "باقة", "en": "packages"},
-    "packages_plural": {"ar": "باقات", "en": "packages"},
-    "from": {"ar": "من", "en": "From"},
-    "back_games": {"ar": "← العودة للألعاب", "en": "← Back to games"},
-    "choose_package": {"ar": "اختر الباقة المناسبة.", "en": "Choose your package."},
-    "search_package": {"ar": "🔍 ابحث عن باقة...", "en": "🔍 Search packages..."},
-    "buy": {"ar": "شراء", "en": "Buy"},
-    "login_to_buy": {"ar": "سجل للشراء", "en": "Login to buy"},
-    "no_packages": {"ar": "لا توجد باقات متاحة لهذه اللعبة حاليًا.", "en": "No packages are available for this game right now."},
-    "checkout": {"ar": "تأكيد الشراء", "en": "Confirm Purchase"},
-    "game": {"ar": "اللعبة", "en": "Game"},
-    "package": {"ar": "الباقة", "en": "Package"},
-    "price": {"ar": "السعر", "en": "Price"},
-    "player_id": {"ar": "معرف اللاعب Player ID", "en": "Player ID"},
-    "confirm_order": {"ar": "تأكيد الطلب", "en": "Confirm Order"},
-    "example_id": {"ar": "مثال: 123456789", "en": "Example: 123456789"},
-    "order": {"ar": "الطلب", "en": "Order"},
-    "status": {"ar": "الحالة", "en": "Status"},
-    "date": {"ar": "التاريخ / سوريا", "en": "Date / Syria"},
-    "waiting": {"ar": "بانتظار التنفيذ", "en": "Waiting"},
-    "manual_pending": {"ar": "بانتظار تنفيذ يدوي", "en": "Manual processing"},
-    "processing": {"ar": "جاري التنفيذ", "en": "Processing"},
-    "completed": {"ar": "مكتمل", "en": "Completed"},
-    "rejected": {"ar": "مرفوض", "en": "Rejected"},
-    "wallet": {"ar": "المحفظة", "en": "Wallet"},
-    "available_balance": {"ar": "الرصيد المتاح", "en": "Available Balance"},
-    "support": {"ar": "الدعم", "en": "Support"},
-    "amount": {"ar": "المبلغ", "en": "Amount"},
-    "payment_method": {"ar": "طريقة الدفع", "en": "Payment Method"},
-    "deposit_note": {"ar": "أدخل المبلغ حسب عملة طريقة الدفع المختارة.", "en": "Enter the amount using the selected payment method currency."},
-    "method_currency": {"ar": "عملة الطريقة", "en": "Method currency"},
-    "address": {"ar": "العنوان / الرقم", "en": "Address / Number"},
-    "proof": {"ar": "إثبات الدفع", "en": "Payment proof"},
-    "submit_deposit": {"ar": "إرسال طلب الشحن", "en": "Submit Top-up Request"},
-    "email": {"ar": "البريد الإلكتروني", "en": "Email"},
-    "password": {"ar": "كلمة المرور", "en": "Password"},
-    "forgot_password": {"ar": "نسيت كلمة المرور؟", "en": "Forgot password?"},
-    "resend_verification": {"ar": "إعادة إرسال رابط التفعيل", "en": "Resend verification link"},
-    "name": {"ar": "الاسم", "en": "Name"},
-    "phone": {"ar": "رقم الهاتف", "en": "Phone"},
-    "confirm_password": {"ar": "تأكيد كلمة المرور", "en": "Confirm Password"},
-    "create_account": {"ar": "إنشاء الحساب", "en": "Create Account"},
-}
-
-def current_lang():
-    # Arabic is the default. English only if explicitly selected in this session.
-    return "en" if session.get("lang") == "en" and session.get("lang_user_selected") == "1" else "ar"
+# V53 REFACTOR (phase 1): public translations + current_lang/tr/lang_url +
+# package_public_name moved to utils/i18n.py. Re-exported here so the
+# context processor and templates keep working until phase 5.
+from utils.i18n import (  # noqa: E402,F401
+    PUBLIC_TRANSLATIONS,
+    current_lang,
+    lang_url,
+    package_public_name,
+    tr,
+)
 
 
-def tr(key):
-    return PUBLIC_TRANSLATIONS.get(key, {}).get(current_lang(), PUBLIC_TRANSLATIONS.get(key, {}).get("ar", key))
-
-def lang_url(target):
-    nxt = request.path
-    if nxt.startswith("/lang/"):
-        nxt = url_for("home")
-    if request.query_string and not nxt.startswith("/lang/"):
-        nxt = request.full_path
-    return url_for("set_language", lang=target, next=nxt)
-
-
-def public_price_text(usd_amount):
-    try:
-        amount = float(usd_amount or 0)
-    except Exception:
-        amount = 0.0
-    if current_lang() == "en":
-        return f"${amount:.2f}"
-    return wallet_money_text(amount)
-
-
-def product_public_price(product, game=None):
-    return product_display_price(product, game)
-
-
-def package_public_name(name):
-    name = str(name or "")
-    # Remove supplier/category labels in both languages.
-    remove_terms = ["MENA Direct Topup", "Mena Direct Topup", "Direct Topup", "direct topup", "شحن مباشر"]
-    for old in remove_terms:
-        name = name.replace(old, "")
-
-    if current_lang() == "en":
-        replacements = [
-            ("جواهر", "Diamonds"), ("جوهرة", "Diamond"),
-            ("شدات ببجي", "PUBG UC"), ("شدات", "UC"),
-            ("بطاقات", "Cards"), ("بطاقة", "Card"),
-            ("عملات", "Coins"), ("عملة", "Coin"),
-            ("قسائم", "Vouchers"), ("قسيمة", "Voucher"),
-            ("نقاط", "Points"), ("نقطة", "Point")
-        ]
-        for old, new in replacements:
-            name = name.replace(old, new)
-        return re.sub(r"\s+", " ", name).strip(" -–—|")
-
-    # Arabic display: translate provider/product English words even if stored in DB in English.
-    replacements = [
-        (r"\bdiamonds\b", "جواهر"),
-        (r"\bdiamond\b", "جوهرة"),
-        (r"\bpubg\s*uc\b", "شدات ببجي"),
-        (r"\buc\b", "شدات"),
-        (r"\bcards\b", "بطاقات"),
-        (r"\bcard\b", "بطاقة"),
-        (r"\bcoins\b", "عملات"),
-        (r"\bcoin\b", "عملة"),
-        (r"\bvouchers\b", "قسائم"),
-        (r"\bvoucher\b", "قسيمة"),
-        (r"\bpoints\b", "نقاط"),
-        (r"\bpoint\b", "نقطة"),
-        (r"\bweekly\b", "أسبوعي"),
-        (r"\bmonthly\b", "شهري"),
-    ]
-    for old, new in replacements:
-        name = re.sub(old, new, name, flags=re.I)
-    return translate_product_name(re.sub(r"\s+", " ", name).strip(" -–—|"))
+# V53 REFACTOR (phase 1): public-facing price wrappers and package_public_name
+# moved to services/pricing.py and utils/i18n.py respectively. Re-exported above.
+from services.pricing import (  # noqa: E402,F401
+    product_public_price,
+    public_price_text,
+)
 
 
 
@@ -620,409 +369,51 @@ def set_language(lang):
 
 
 
-def get_pricing_mode():
-    """base pricing mode: usd | auto_syp"""
-    mode = get_setting("pricing_mode", "usd")
-    return mode if mode in ("usd", "auto_syp") else "usd"
-
-
-def get_display_currency():
-    return "USD" if get_pricing_mode() == "usd" else "SYP"
-
-
-def manual_price_edit_enabled():
-    return get_setting("manual_price_edit_enabled", "0") == "1"
-
-
-def get_usd_syp_rate():
-    try:
-        return float(get_setting("usd_syp_rate", "15000") or 15000)
-    except Exception:
-        return 15000.0
-
-
-def display_price_value(usd_amount, currency=None):
-    try:
-        amount = float(usd_amount or 0)
-    except Exception:
-        amount = 0.0
-    cur = currency or get_display_currency()
-    if cur == "SYP":
-        return round(amount * get_usd_syp_rate(), 0)
-    return round(amount, 2)
-
-
-def display_price_text(usd_amount, currency=None):
-    cur = currency or get_display_currency()
-    val = display_price_value(usd_amount, cur)
-    if cur == "SYP":
-        return f"{val:,.0f} ل.س"
-    return f"{val:.2f}$"
-
-
-def product_manual_syp(product):
-    try:
-        return float((product or {}).get("manual_price_syp") or 0)
-    except Exception:
-        return 0.0
-
-
-def manual_syp_override_active(product):
-    return manual_price_edit_enabled() and product_manual_syp(product) > 0
-
-
-def product_sell_usd(product, game=None):
-    product = product or {}
-    rate = get_usd_syp_rate()
-    try:
-        sell_usd = float(product.get("sell_price") or 0)
-    except Exception:
-        sell_usd = 0.0
-
-    # Manual SYP is an override only when enabled and a value exists.
-    if manual_syp_override_active(product) and rate > 0:
-        return product_manual_syp(product) / rate
-
-    return sell_usd
-
-
-def product_display_price(product, game=None):
-    product = product or {}
-
-    if current_lang() == "en":
-        return f"${product_sell_usd(product, game):.2f}"
-
-    # Manual SYP overrides the selected base pricing mode only if enabled.
-    if manual_syp_override_active(product):
-        return f"{product_manual_syp(product):,.0f} ل.س"
-
-    if get_pricing_mode() == "auto_syp":
-        return display_price_text(product.get("sell_price", 0), "SYP")
-
-    return display_price_text(product.get("sell_price", 0), "USD")
-
-
-def product_profit_percent(product, game=None):
-    try:
-        base = float((product or {}).get("base_price") or 0)
-        sell = float(product_sell_usd(product, game))
-        if base <= 0:
-            return None
-        return round(((sell / base) - 1) * 100, 2)
-    except Exception:
-        return None
-
-
-def wallet_money_text(amount):
-    try:
-        amount = float(amount or 0)
-    except Exception:
-        amount = 0.0
-    if current_lang() == "en":
-        return f"${amount:.2f}"
-    if get_display_currency() == "SYP":
-        return f"{amount * get_usd_syp_rate():,.0f} ل.س"
-    return f"{amount:.2f}$"
-
-
-
-
-
-
-
-def email_verification_is_enabled():
-    return get_setting("email_verification_enabled", "0") == "1"
-
-
-def email_is_configured():
-    return bool(MAIL_SERVER and MAIL_USERNAME and MAIL_PASSWORD and MAIL_FROM)
-
-
-# V42 batch2: async email queue ----------------------------------------
-email_queue = Queue()
-
-
-def _send_email_sync(to_email, subject, body, html_body=None):
-    if not email_is_configured():
-        app.logger.warning("Email skipped (SMTP not configured): to=%s subject=%s", to_email, subject)
-        return
-    # Build multipart message (plain + HTML) to improve deliverability
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    # V67 DELIVERABILITY: From, Sender, Reply-To
-    # Gmail rewrites From: to the auth user if MAIL_FROM differs, but if we
-    # explicitly set Sender: to the auth user we keep the friendly From: AND
-    # pass SPF/DKIM alignment. Reply-To routes user replies to the inbox we
-    # actually monitor.
-    msg["From"] = formataddr((MAIL_FROM_NAME, MAIL_FROM))
-    if MAIL_USERNAME and MAIL_USERNAME.lower() != MAIL_FROM.lower():
-        msg["Sender"] = MAIL_USERNAME
-    msg["To"] = to_email
-    msg["Reply-To"] = MAIL_REPLY_TO or MAIL_FROM
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain=MAIL_FROM.split("@")[-1] if "@" in MAIL_FROM else _BASE_DOMAIN)
-    # V67 DELIVERABILITY headers for transactional mail.
-    # IMPORTANT: do NOT add "Precedence: bulk" or a mailto-only
-    # List-Unsubscribe — those are signals for newsletters and push
-    # account-verification mail straight into Spam at Gmail.
-    msg["X-Mailer"] = "TecnoGems Transactional Mailer"
-    msg["X-Auto-Response-Suppress"] = "All"
-    msg["Auto-Submitted"] = "auto-generated"
-    msg["X-Entity-Ref-ID"] = make_msgid(domain=_BASE_DOMAIN).strip("<>")
-    # MIME-Version is required by some spam filters even though Python adds
-    # it automatically — set it explicitly so it always lands at the top.
-    msg["MIME-Version"] = "1.0"
-
-    # Attach plain text first (fallback)
-    part_text = MIMEText(body, "plain", "utf-8")
-    msg.attach(part_text)
-    # Attach HTML if provided
-    if html_body:
-        part_html = MIMEText(html_body, "html", "utf-8")
-        msg.attach(part_html)
-    try:
-        with smtplib.SMTP(MAIL_SERVER, MAIL_PORT, timeout=30) as server:
-            server.ehlo()
-            if MAIL_USE_TLS:
-                server.starttls()
-                server.ehlo()
-            server.login(MAIL_USERNAME, MAIL_PASSWORD)
-            # V67 DELIVERABILITY: pass an explicit envelope sender that is
-            # always the authenticated mailbox. This is the SPF-aligned
-            # address — without it Gmail rewrites the bounce path and the
-            # message can fail SPF.
-            server.send_message(
-                msg,
-                from_addr=_aligned_envelope_sender(),
-                to_addrs=[to_email],
-            )
-        app.logger.info("Email sent successfully to=%s subject=%s", to_email, subject)
-    except smtplib.SMTPAuthenticationError as exc:
-        app.logger.error(
-            "Email AUTH FAILED to=%s subject=%s: %s. "
-            "تأكد من استخدام Gmail App Password (16 حرف بدون مسافات) في MAIL_PASSWORD وليس كلمة مرور الحساب العادية.",
-            to_email, subject, exc,
-        )
-        raise
-    except smtplib.SMTPException as exc:
-        app.logger.error("Email SMTP error to=%s subject=%s: %s", to_email, subject, exc)
-        raise
-    except Exception as exc:
-        app.logger.error("Email send failed to=%s subject=%s: %s", to_email, subject, exc)
-        raise
-
-
-def _email_worker():
-    while True:
-        item = email_queue.get()
-        try:
-            if item is None:
-                continue
-            _send_email_sync(*item)
-        except Exception as exc:
-            app.logger.error("email_worker error: %s", exc)
-        finally:
-            email_queue.task_done()
-
-
-# spin up 2 worker threads (lightweight) for parallel SMTP sends
-for _i in range(2):
-    threading.Thread(target=_email_worker, daemon=True, name=f"email-worker-{_i}").start()
-
-
-def send_email(to_email, subject, body, html_body=None):
-    """Non-blocking: enqueue email and return immediately.
-
-    V45: prefer durable RQ queue when REDIS_URL is configured; fall back to
-    the in-process thread queue otherwise (backwards compatible).
-    """
-    if not email_is_configured():
-        raise RuntimeError("SMTP email settings are missing. Check .env")
-    try:
-        from tasks import enqueue_email, USE_RQ
-        if USE_RQ:
-            enqueue_email(
-                to_email, subject, body,
-                MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD,
-                MAIL_USE_TLS, MAIL_FROM,
-                html_body=html_body,
-                mail_from_name=MAIL_FROM_NAME,
-                reply_to=MAIL_REPLY_TO or MAIL_FROM,
-            )
-            return
-    except Exception as exc:
-        app.logger.warning("RQ enqueue failed, falling back to thread queue: %s", exc)
-    email_queue.put((to_email, subject, body, html_body))
-
-
-def _build_email_html(title, greeting, message, button_text, button_url, footer_note):
-    """Build a professional HTML email that passes spam filters.
-
-    Key anti-spam techniques:
-    - Proper HTML structure with DOCTYPE
-    - Inline CSS only (no external stylesheets)
-    - Good text-to-image ratio (no images)
-    - Clear unsubscribe/ignore note
-    - Mobile-responsive design
-    - No spam trigger words in subject handled by callers
-    """
-    return f"""<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title}</title>
-</head>
-<body style="margin:0;padding:0;background-color:#0f172a;font-family:Arial,Helvetica,sans-serif;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#0f172a;">
-<tr><td align="center" style="padding:40px 20px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;background-color:#1e293b;border-radius:16px;border:1px solid #334155;">
-<!-- Header -->
-<tr><td style="padding:32px 32px 0;text-align:center;">
-  <h1 style="margin:0;font-size:28px;font-weight:800;color:#a78bfa;letter-spacing:-0.5px;">TecnoGems</h1>
-  <p style="margin:8px 0 0;font-size:13px;color:#64748b;">منصة شحن الألعاب</p>
-</td></tr>
-<!-- Body -->
-<tr><td style="padding:32px;">
-  <h2 style="margin:0 0 16px;font-size:20px;color:#f1f5f9;font-weight:700;">{greeting}</h2>
-  <p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#cbd5e1;">{message}</p>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
-  <tr><td align="center">
-    <a href="{button_url}" target="_blank"
-       style="display:inline-block;padding:14px 36px;background-color:#7c3aed;color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">
-      {button_text}
-    </a>
-  </td></tr>
-  </table>
-  <p style="margin:24px 0 0;font-size:13px;color:#64748b;line-height:1.6;">
-    إذا لم يعمل الزر، انسخ الرابط التالي والصقه في المتصفح:<br>
-    <a href="{button_url}" style="color:#a78bfa;word-break:break-all;font-size:12px;">{button_url}</a>
-  </p>
-</td></tr>
-<!-- Footer -->
-<tr><td style="padding:0 32px 32px;border-top:1px solid #334155;">
-  <p style="margin:20px 0 0;font-size:12px;color:#475569;line-height:1.6;text-align:center;">
-    {footer_note}<br>
-    <a href="{BASE_URL}/email-info" style="color:#64748b;text-decoration:underline;">لماذا وصلتك هذه الرسالة؟</a><br>
-    <span style="color:#64748b;">&copy; TecnoGems - جميع الحقوق محفوظة</span>
-  </p>
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>"""
-
-
-def send_verification_email(to_email, token):
-    link = f"{BASE_URL}/verify-email/{token}"
-    # V67 DELIVERABILITY: richer plain-text body. A near-empty plain-text
-    # part with a heavy HTML part is one of the strongest spam signals at
-    # Gmail. Match the HTML content closely in plain text.
-    body = f"""مرحبًا بك في TecnoGems
-
-شكرًا لإنشاء حسابك. لتفعيل بريدك الإلكتروني والبدء في استخدام المنصة،
-افتح الرابط التالي خلال 24 ساعة:
-
-{link}
-
-إذا لم تطلب إنشاء حساب على TecnoGems يمكنك تجاهل هذه الرسالة بأمان،
-ولن يتم إنشاء أي حساب باستخدام بريدك.
-
-— فريق TecnoGems
-{BASE_URL}
-
-ملاحظة: هذه رسالة تلقائية لتأكيد البريد الإلكتروني، يرجى عدم الرد عليها.
-للدعم تواصل معنا عبر صفحة الدعم على الموقع.
-"""
-    html_body = _build_email_html(
-        title="تفعيل حسابك - TecnoGems",
-        greeting="مرحبًا بك في TecnoGems!",
-        message="شكرًا لإنشاء حسابك. لتفعيل بريدك الإلكتروني والبدء في استخدام المنصة، اضغط على الزر أدناه. صلاحية الرابط 24 ساعة.",
-        button_text="تفعيل الحساب",
-        button_url=link,
-        footer_note="إذا لم تقم بإنشاء حساب في TecnoGems، يمكنك تجاهل هذه الرسالة بأمان. هذه رسالة تلقائية، لا تردّ عليها.",
-    )
-    # V62.1 FIX: send synchronously so SMTP errors surface to the caller
-    # (registration / resend-verification) instead of being silently swallowed
-    # by the background queue. The async send_email() path was the reason
-    # users complained "test email arrives but verification email never does":
-    # send_email() returned immediately and any SMTP failure happened later
-    # in a thread / RQ worker and never reached the user.
-    if not email_is_configured():
-        raise RuntimeError("SMTP email settings are missing. Check .env")
-    _send_email_sync(to_email, "TecnoGems - تفعيل حسابك", body, html_body=html_body)
-
-
-def send_password_reset_email(to_email, token):
-    link = f"{BASE_URL}/reset-password/{token}"
-    # V67 DELIVERABILITY: plain text mirrors HTML content for a healthier
-    # text-to-html ratio.
-    body = f"""مرحبًا
-
-تلقينا طلبًا لإعادة تعيين كلمة المرور الخاصة بحسابك على TecnoGems.
-
-لإنشاء كلمة مرور جديدة، افتح الرابط التالي:
-{link}
-
-صلاحية الرابط ساعة واحدة فقط من تاريخ إرسال هذه الرسالة.
-إذا لم تطلب استعادة كلمة المرور يمكنك تجاهل هذه الرسالة، حسابك آمن
-ولن يتم إجراء أي تغيير.
-
-— فريق TecnoGems
-{BASE_URL}
-
-ملاحظة: هذه رسالة تلقائية، يرجى عدم الرد عليها.
-للدعم تواصل معنا عبر صفحة الدعم على الموقع.
-"""
-    html_body = _build_email_html(
-        title="استعادة كلمة المرور - TecnoGems",
-        greeting="استعادة كلمة المرور",
-        message="تلقينا طلبًا لإعادة تعيين كلمة المرور الخاصة بحسابك. اضغط على الزر أدناه لإنشاء كلمة مرور جديدة. صلاحية الرابط ساعة واحدة فقط.",
-        button_text="إعادة تعيين كلمة المرور",
-        button_url=link,
-        footer_note="إذا لم تطلب استعادة كلمة المرور، يمكنك تجاهل هذه الرسالة. حسابك آمن. هذه رسالة تلقائية، لا تردّ عليها.",
-    )
-    # V62.1 FIX: same reason as send_verification_email — send synchronously
-    # so the user gets a real error message when SMTP misbehaves.
-    if not email_is_configured():
-        raise RuntimeError("SMTP email settings are missing. Check .env")
-    _send_email_sync(to_email, "TecnoGems - استعادة كلمة المرور", body, html_body=html_body)
-
-
-def send_email_change_confirmation(to_email, token):
-    link = f"{BASE_URL}/confirm-email-change/{token}"
-    body = f"""مرحبًا
-
-تلقينا طلبًا لتغيير البريد الإلكتروني المرتبط بحسابك على TecnoGems.
-
-لتأكيد التغيير، افتح الرابط التالي:
-{link}
-
-إذا لم تطلب تغيير البريد يمكنك تجاهل هذه الرسالة، ولن يتم إجراء أي
-تعديل على حسابك.
-
-— فريق TecnoGems
-{BASE_URL}
-
-ملاحظة: هذه رسالة تلقائية، يرجى عدم الرد عليها.
-"""
-    html_body = _build_email_html(
-        title="تأكيد تغيير البريد - TecnoGems",
-        greeting="تأكيد تغيير البريد الإلكتروني",
-        message="تلقينا طلبًا لتغيير البريد الإلكتروني المرتبط بحسابك. اضغط على الزر أدناه لتأكيد التغيير.",
-        button_text="تأكيد تغيير البريد",
-        button_url=link,
-        footer_note="إذا لم تطلب تغيير البريد الإلكتروني، يمكنك تجاهل هذه الرسالة.",
-    )
-    # V62.1 FIX (extended): send synchronously so SMTP errors surface to the
-    # caller in profile() instead of being silently swallowed by the background
-    # queue. The async send_email() path returned immediately and any SMTP
-    # failure happened later in a thread / RQ worker and never reached the
-    # user, so they always saw "تم الإرسال" even when the email never left.
-    if not email_is_configured():
-        raise RuntimeError("SMTP email settings are missing. Check .env")
-    _send_email_sync(to_email, "TecnoGems - تأكيد تغيير البريد", body, html_body=html_body)
+# V53 REFACTOR (phase 1): pricing helpers moved to services/pricing.py.
+# Re-exported here so existing `from app import display_price_text` etc.
+# keep working until phase 5.
+from services.pricing import (  # noqa: E402,F401
+    display_price_text,
+    display_price_value,
+    get_display_currency,
+    get_pricing_mode,
+    get_usd_syp_rate,
+    manual_price_edit_enabled,
+    manual_syp_override_active,
+    product_display_price,
+    product_manual_syp,
+    product_profit_percent,
+    product_sell_usd,
+    wallet_money_text,
+)
+
+
+
+
+
+
+
+# V53 REFACTOR (phase 1): mail subsystem moved to services/mail.py and the
+# transactional email HTML to templates/email/*.html. Re-exported here so
+# `from app import send_email`, `_send_email_sync`, `email_queue`, and
+# `_build_email_html` keep working until phase 5.
+#
+# IMPORTANT: services/mail.py spawns its own worker threads at import. The
+# threads previously spawned here (`for _i in range(2): threading.Thread(...)`)
+# have been removed to avoid double-spawning.
+from services.mail import (  # noqa: E402,F401
+    _build_email_html,
+    _send_email_sync,
+    email_is_configured,
+    email_queue,
+    email_verification_is_enabled,
+    send_email,
+    send_email_change_confirmation,
+    send_password_reset_email,
+    send_verification_email,
+)
+# _email_worker remains as a re-export for any external monitoring tool.
+from services.mail import _email_worker  # noqa: E402,F401
 
 
 # V53: RQ is the only order queue backend. In-memory fallback removed —
@@ -1331,38 +722,40 @@ def inject_user():
 
 
 
+# V53 REFACTOR (phase 1): Jinja template filters moved to utils/filters.py.
+# We keep the @app.template_filter decorators here so the filters are
+# registered on this app instance (the legacy auth_bp / templates rely on
+# the names being live), but each one delegates to the extracted helper.
+# The bare names (`syria_time`, `money`, ...) are also re-exported for
+# any direct `from app import money` imports that may exist.
+from utils.filters import (  # noqa: E402,F401
+    clean_package_name as _filter_clean_package_name,
+    money as _filter_money,
+    order_status_class as _filter_order_status_class,
+    order_status_label as _filter_order_status_label,
+    public_package_name_filter as _filter_public_package_name,
+    syria_time as _filter_syria_time,
+)
+
+
 @app.template_filter("public_package_name")
 def public_package_name_filter(value):
-    return package_public_name(value)
+    return _filter_public_package_name(value)
+
 
 @app.template_filter("syria_time")
 def syria_time(value):
-    """تحويل timestamp إلى توقيت سوريا UTC+3."""
-    try:
-        ts = int(value)
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(timezone(timedelta(hours=3)))
-        return dt.strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return value
+    return _filter_syria_time(value)
 
 
 @app.template_filter("money")
 def money(amount):
-    return display_price_text(amount)
+    return _filter_money(amount)
+
 
 @app.template_filter("clean_package_name")
 def clean_package_name(value):
-    """تنظيف أسماء الباقات المعروضة للمستخدم من عبارات المزود الفنية."""
-    text = str(value or "")
-    patterns = [
-        r"\bMENA\s+Direct\s+Topup\b\s*-?\s*",
-        r"\bMena\s+Direct\s+Topup\b\s*-?\s*",
-        r"\bmena\s+direct\s+topup\b\s*-?\s*",
-    ]
-    for pat in patterns:
-        text = re.sub(pat, "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s{2,}", " ", text).strip(" -–—\t\n")
-    return text or str(value or "")
+    return _filter_clean_package_name(value)
 
 
 
@@ -1464,30 +857,12 @@ def admin_required(fn):
 
 @app.template_filter("order_status_label")
 def order_status_label(status):
-    labels = {
-        "waiting": "بانتظار التنفيذ",
-        "processing": "جاري التنفيذ",
-        "supplier_pending": "جاري التنفيذ",
-        "manual_pending": "بانتظار تنفيذ يدوي",
-        "completed": "مكتمل",
-        "rejected": "مرفوض",
-        "pending": "معلق",
-    }
-    return labels.get(status, status)
+    return _filter_order_status_label(status)
 
 
 @app.template_filter("order_status_class")
 def order_status_class(status):
-    classes = {
-        "waiting": "waiting",
-        "processing": "processing",
-        "supplier_pending": "processing",
-        "manual_pending": "pending",
-        "completed": "completed",
-        "rejected": "rejected",
-        "pending": "pending",
-    }
-    return classes.get(status, "pending")
+    return _filter_order_status_class(status)
 
 
 
