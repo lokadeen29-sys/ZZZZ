@@ -10,10 +10,10 @@
     <button class="btn primary" type="submit">بحث</button>
   </form>
   <div class="links" style="margin-bottom:16px">
-    <a class="btn" href="{{ url_for('admin_deposits') }}">الكل</a>
-    <a class="btn" href="{{ url_for('admin_deposits', status='pending') }}">معلقة</a>
-    <a class="btn" href="{{ url_for('admin_deposits', status='approved') }}">مقبولة</a>
-    <a class="btn" href="{{ url_for('admin_deposits', status='rejected') }}">مرفوضة</a>
+    <a class="btn" href="{{ url_for('admin.deposits') }}">الكل</a>
+    <a class="btn" href="{{ url_for('admin.deposits', status='pending') }}">معلقة</a>
+    <a class="btn" href="{{ url_for('admin.deposits', status='approved') }}">مقبولة</a>
+    <a class="btn" href="{{ url_for('admin.deposits', status='rejected') }}">مرفوضة</a>
   </div>
   <div class="table-wrap">
     <table>
@@ -45,11 +45,11 @@
           <td>
             {% if d.status == 'pending' %}
               <div class="deposit-actions" style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
-                <form method="post" action="{{ url_for('admin_deposit_action', deposit_id=d.id, action='approve') }}" style="display:inline">
+                <form method="post" action="{{ url_for('admin.deposit_action', deposit_id=d.id, action='approve') }}" style="display:inline">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn success" type="submit" style="min-width:110px">✅ موافقة</button>
                 </form>
-                <form method="post" action="{{ url_for('admin_deposit_action', deposit_id=d.id, action='reject') }}"
+                <form method="post" action="{{ url_for('admin.deposit_action', deposit_id=d.id, action='reject') }}"
                       style="display:inline"
                       data-confirm="هل أنت متأكد من رفض هذا الطلب؟">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

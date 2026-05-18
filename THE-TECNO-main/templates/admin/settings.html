@@ -125,7 +125,7 @@
        تعارض بين النموذجين (نفس المفتاح كان يُحفظ من مكانين بأسماء مختلفة). #}
     <div class="alert" style="margin-top:14px;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.25);border-radius:10px;padding:10px 14px;font-size:13px">
       تفعيل/إيقاف <b>المورد 1</b> و <b>المورد 2</b> أصبح يُدار من
-      <a href="{{ url_for('admin_games') }}"><b>صفحة الألعاب</b></a>
+      <a href="{{ url_for('admin.games') }}"><b>صفحة الألعاب</b></a>
       (في أعلى كل عمود سيرفر يوجد زر "السيرفر مُفعَّل / مُوقَف").
     </div>
 
@@ -187,7 +187,7 @@ MAIL_FROM=your-email@gmail.com</pre>
     <p class="muted" style="font-size:13px;margin:0 0 12px">
       أرسل إيميل اختبار للتأكد من أن SMTP يعمل. سيتم الإرسال مباشرة (بدون طابور) لتظهر أي أخطاء فورًا.
     </p>
-    <form method="post" action="{{ url_for('admin_test_email') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <form method="post" action="{{ url_for('admin.test_email') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="email" name="to" placeholder="البريد المستلم (اتركه فارغًا لإرساله إليك)" style="flex:1;min-width:250px">
       <button type="submit" class="btn primary">إرسال إيميل اختبار</button>

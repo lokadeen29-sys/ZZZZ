@@ -2,12 +2,16 @@
 
 Phase 1 extracted ``auth_bp``. Phase 2 added ``oauth_bp`` (Google OAuth client,
 ``google_oauth_enabled`` template flag, root-scope ``/sw.js`` service worker).
-Phase 3 adds ``public_bp`` (storefront / SEO / legal pages / proof file
+Phase 3 added ``public_bp`` (storefront / SEO / legal pages / proof file
 serving / language switcher) and ``wallet_bp`` (the user wallet + deposit
 form + transactions list).
+Phase 4 adds ``admin_2fa_bp`` (TOTP setup / confirm / challenge / disable /
+backup-code regeneration) and ``admin_bp`` (every other ``/admin/*`` route:
+dashboard, orders, users, balances, games, products, accounting, deposits,
+payment methods, settings, the SMTP test button, and the manual SYP price
+override form).
 
-Future phases will register admin_bp, admin_2fa_bp, api_bp here — without
-further edits to app.py.
+Future phases will register api_bp here — without further edits to app.py.
 
 Import is deferred into ``register_blueprints()`` on purpose: every
 extracted blueprint module does ``from app import …helpers…`` at module
@@ -50,3 +54,15 @@ def register_blueprints(app, deps=None) -> None:
 
     from .wallet_bp import bp as wallet_bp
     app.register_blueprint(wallet_bp)
+
+    # Phase 4: split admin into two blueprints. ``admin_2fa_bp`` is registered
+    # *before* ``admin_bp`` so the 2FA endpoint names ("admin_2fa.setup",
+    # "admin_2fa.challenge", …) resolve when ``admin_required`` (defined in
+    # app.py) builds its whitelist of endpoints that must NOT be gated by
+    # the 2FA challenge. URL spaces don't overlap so the order is otherwise
+    # free, but registering 2FA first matches the dependency direction.
+    from .admin_2fa_bp import bp as admin_2fa_bp
+    app.register_blueprint(admin_2fa_bp)
+
+    from .admin_bp import bp as admin_bp
+    app.register_blueprint(admin_bp)

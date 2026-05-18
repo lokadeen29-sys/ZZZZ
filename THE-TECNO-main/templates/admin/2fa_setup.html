@@ -20,7 +20,7 @@
       {{ secret }}
     </code>
 
-    <form method="post" action="{{ url_for('admin_2fa_confirm') }}" style="margin-top:22px">
+    <form method="post" action="{{ url_for('admin_2fa.confirm') }}" style="margin-top:22px">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>أدخل الرمز المكون من 6 أرقام لتأكيد الإعداد</label>
       <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6"

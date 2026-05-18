@@ -194,9 +194,9 @@ behaviour is identical (no-op when `Flask-Limiter` is missing).
 **Branch:** `refactor/phase-4-admin`
 **Estimated diff:** ~1,300 lines moved
 
-- [ ] Create `app/routes/admin_2fa_bp.py`:
+- [x] Create `app/routes/admin_2fa_bp.py`:
       setup, confirm, challenge, disable, regenerate_backup_codes.
-- [ ] Create `app/routes/admin_bp.py`:
+- [x] Create `app/routes/admin_bp.py`:
       dashboard, orders, order_action, users, user_detail, user_balance,
       balances, games, add_game, game_image, game_products,
       update_manual_syp_prices, accounting, deposits, deposit_action,
@@ -206,6 +206,84 @@ behaviour is identical (no-op when `Flask-Limiter` is missing).
       deposit approve/reject, settings save, image upload.
 
 **Acceptance:** Admin routes are out of `app.py`.
+
+**Phase 4 result (2026-05-18):** `app.py` shrank from 2,530 to **1,532 lines**
+(−998 lines, −39%). The 25 admin routes (5 in `admin_2fa_bp.py` + 20 in
+`admin_bp.py`) are now defined entirely under blueprints. `admin_required`
+itself stays in `app.py` because (a) it's used by both blueprints and
+several remaining helpers, and (b) it composes `@login_required`,
+`current_user`, `get_setting`, and `session` — all of which are still
+local to `app.py`. Its endpoint-name whitelist for the 2FA gate was
+updated in lock-step (`admin_2fa_setup` → `admin_2fa.setup`, etc.).
+
+**Endpoint convention:** namespaced (`admin.dashboard`, `admin.orders`,
+`admin.deposit_action`, `admin_2fa.setup`, `admin_2fa.challenge`, …)
+following the Phase 2/3 precedent. 49 `url_for(...)` references across
+13 files were updated in the same commit:
+
+- 11 `templates/admin/dashboard.html` (every dashboard tile + every 2FA
+  card link)
+- 14 `templates/admin/orders.html` (status filters × provider filters,
+  retry/complete/reject form actions, refresh button)
+- 6 `templates/admin/deposits.html` (status filters + approve/reject
+  per row)
+- 5 `templates/admin/games.html` (form action + per-game image form +
+  add-game form)
+- 3 `templates/admin/users.html` (search reset + per-user view + balance
+  form action)
+- 2 `templates/admin/settings.html` (test-email form + games-page link)
+- 2 `templates/base.html` (admin link in mobile + desktop navbars)
+- 1 each in `templates/admin/2fa_setup.html`,
+  `templates/admin/2fa_backup_codes.html`,
+  `templates/admin/game_products.html`,
+  `templates/admin/payment_methods.html`,
+  `templates/admin/user_detail.html`,
+  `templates/products.html`
+
+**Decorator preservation — checked verbatim:**
+
+- Every `@login_required` then `@admin_required` ordering is identical
+  to app.py.
+- Every per-route rate limit moved through the `_rl(...)` shim (the
+  same pattern used in `routes/auth_bp.py` / `public_bp.py`):
+  - `admin_2fa.setup` — `10 per minute`
+  - `admin_2fa.confirm` — `10 per minute`
+  - `admin_2fa.challenge` — `15 per minute`
+  - `admin_2fa.disable` — `5 per minute`
+  - `admin_2fa.regenerate_backup_codes` — `3 per hour`
+  - `admin.order_action` — `60 per minute`
+  - `admin.user_balance` — `30 per minute`
+  - `admin.add_game` — `20 per minute`
+  - `admin.deposit_action` — `60 per minute`
+  - `admin.refresh_pending_orders` — `6 per minute`
+  - `admin.test_email` — `5 per minute`
+  All other admin routes had no per-route limit in `app.py` and still
+  have none here.
+- CSRF: every admin route was implicitly protected by the global
+  `CSRFProtect(app)` (only `/api/*` endpoints are `csrf.exempt(...)`).
+  None of the moved routes are exempt now either, so behaviour is
+  identical.
+
+**Function-name aliasing for `admin.update_manual_syp_prices`:** The
+manual SYP price-override route is unique in that templates already
+referenced it as `url_for("admin_update_manual_syp_prices", …)`. To
+keep the *new* name short (`admin.update_manual_syp_prices`) while not
+having a Python view function shadow the imported `update_manual_syp_prices`
+DB helper, the view is defined as `def update_manual_syp_prices_view(...)`
+with `__name__ = "update_manual_syp_prices"` set explicitly so Flask
+registers the endpoint under the clean namespaced name.
+
+**Files added in Phase 4 (under `THE-TECNO-main/`):**
+- `routes/admin_2fa_bp.py`
+- `routes/admin_bp.py`
+
+**Files modified in Phase 4:**
+- `app.py` (removed extracted route blocks; updated `admin_required`'s
+  2FA whitelist; kept the `_VP_CACHE` block intact since it's used by
+  `/api/validate-player`, which is a Phase 5 deliverable)
+- `routes/__init__.py` (register `admin_2fa_bp` then `admin_bp`)
+- 13 templates under `templates/`
+- `.kiro/specs/app-refactor/tasks.md` (this file)
 
 ---
 
@@ -316,6 +394,38 @@ behaviour is identical (no-op when `Flask-Limiter` is missing).
   blueprint, the live application is accessed via `flask.current_app`
   to keep the module decoupled from the specific app object (and to
   align with the Application Factory direction in Phase 5).
+- 2026-05-18 (Phase 4): **`admin_required` stays in `app.py`.** It is
+  used by both new blueprints and composes `current_user`,
+  `login_required`, `get_setting`, and `session` — all of which still
+  live in `app.py` until Phase 5. Moving it now would require either
+  duplicating the dependencies or threading them through, neither of
+  which improves the diff. It will move to `app/utils/auth.py` in
+  Phase 5 alongside the factory swap.
+- 2026-05-18 (Phase 4): **`admin_2fa_bp` is registered *before*
+  `admin_bp` in `register_blueprints`.** The dependency direction
+  matches phase 2's oauth-before-auth registration order: the 2FA
+  endpoint names (`admin_2fa.*`) are referenced by `admin_required`'s
+  whitelist, which fires on every `/admin/*` request including those
+  served by `admin_bp`. Registering `admin_2fa_bp` first guarantees
+  those names exist by the time the first admin request lands. URL
+  spaces don't overlap so the order is otherwise free.
+- 2026-05-18 (Phase 4): **`/admin/game/<provider>/<game_key>/manual-prices`
+  is part of `admin_bp`, not `public_bp`, even though it redirects back
+  to `public.products`.** The route requires `@admin_required` and
+  modifies admin-only data (manual SYP overrides). Its URL prefix
+  `/admin/...` plus the decorator stack put it firmly under
+  `admin_bp`. The Python function is named
+  `update_manual_syp_prices_view` to avoid shadowing the imported
+  `update_manual_syp_prices` DB helper, with `__name__` patched to
+  `"update_manual_syp_prices"` so Flask registers the clean endpoint
+  `admin.update_manual_syp_prices` that templates already reference.
+- 2026-05-18 (Phase 4): **`_is_admin_user()` moved with the 2FA flow,
+  not kept in `app.py`.** It was only ever called by the five 2FA
+  routes. The non-2FA admin routes use the stricter `@admin_required`
+  decorator (which performs both the role check and the 2FA gate).
+  Co-locating `_is_admin_user` with its only callers (in
+  `routes/admin_2fa_bp.py`) is cleaner than leaving a single-use
+  helper in `app.py`.
 
 ## Open Questions
 (answer before starting the relevant phase)
