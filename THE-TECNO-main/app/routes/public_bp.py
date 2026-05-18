@@ -76,22 +76,26 @@ from flask import (
 from markupsafe import Markup
 from werkzeug.utils import secure_filename
 
-from app import (
-    BASE_URL,
-    InsufficientBalance,
-    MAX_PLAYER_ID_LEN,
+from app.config import BaseConfig
+from app.extensions import limiter
+from app.services.mail import (
     _BASE_DOMAIN,
+    send_email_change_confirmation,
+)
+from app.services.orders import enqueue_order_job
+from app.utils.auth import current_user, login_required
+from app.utils.i18n import current_lang
+from app.utils.security import safe_next_url
+from app.utils.settings_cache import get_setting
+from audit import log_audit
+from database import (
+    InsufficientBalance,
     can_download_proof,
     create_order,
-    current_lang,
-    current_user,
-    enqueue_order_job,
     get_game,
     get_product,
     get_product_group,
-    get_setting,
     get_user_by_email,
-    limiter,
     list_games,
     list_home_games,
     list_product_groups,
@@ -99,15 +103,17 @@ from app import (
     list_public_games,
     list_public_product_groups_for_home,
     list_user_orders,
-    log,
-    log_audit,
-    login_required,
-    safe_next_url,
-    send_email_change_confirmation,
     set_pending_email_change,
     stats,
     update_user_profile,
 )
+import logging
+
+log = logging.getLogger("tecnogems.public")
+
+# Length caps + URL constants (mirror the legacy app.py module globals).
+BASE_URL = BaseConfig.BASE_URL
+MAX_PLAYER_ID_LEN = BaseConfig.MAX_PLAYER_ID_LEN
 
 
 bp = Blueprint("public", __name__)

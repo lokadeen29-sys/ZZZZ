@@ -34,6 +34,7 @@ import secrets
 
 from flask import (
     Blueprint,
+    current_app,
     flash,
     redirect,
     render_template,
@@ -43,40 +44,41 @@ from flask import (
 )
 from markupsafe import Markup
 
-from app import (
-    MAX_EMAIL_LEN,
-    MAX_NAME_LEN,
-    MAX_PASSWORD_LEN,
-    MAX_PHONE_LEN,
-    app as _flask_app,
+from app.config import BaseConfig
+from app.extensions import limiter
+from app.services.mail import (
+    email_verification_is_enabled,
+    send_password_reset_email,
+    send_verification_email,
+)
+from app.utils.auth import current_user
+from app.utils.security import safe_next_url, validate_password_strength
+from app.utils.settings_cache import get_setting
+from database import (
     authenticate,
     confirm_pending_email_change,
     create_user,
-    current_user,
-    email_verification_is_enabled,
-    get_real_ip,
-    get_setting,
+    create_user_oauth as _db_create_user_oauth,
     get_user_by_email,
+    get_user_by_google_sub as _db_get_user_by_google_sub,
     get_user_by_id,
     get_user_by_reset_token,
-    limiter,
-    log,
+    link_user_google_sub as _db_link_user_google_sub,
     reset_user_password,
-    safe_next_url,
-    send_password_reset_email,
-    send_verification_email,
     set_password_reset_token,
     set_user_email_token,
-    validate_password_strength,
     verify_user_email,
 )
+from request_ip import get_real_ip
+import logging
 
-# Pre-wired DB helpers for Google OAuth
-from database import (
-    create_user_oauth as _db_create_user_oauth,
-    get_user_by_google_sub as _db_get_user_by_google_sub,
-    link_user_google_sub as _db_link_user_google_sub,
-)
+log = logging.getLogger("tecnogems.auth")
+
+# Length caps — mirror the legacy module-level constants from app.py.
+MAX_EMAIL_LEN = BaseConfig.MAX_EMAIL_LEN
+MAX_NAME_LEN = BaseConfig.MAX_NAME_LEN
+MAX_PASSWORD_LEN = BaseConfig.MAX_PASSWORD_LEN
+MAX_PHONE_LEN = BaseConfig.MAX_PHONE_LEN
 
 bp = Blueprint("auth", __name__)
 
@@ -427,7 +429,7 @@ def auth_google_callback():
         token = _oauth.google.authorize_access_token()
         userinfo = token.get("userinfo") or _oauth.google.parse_id_token(token, None)
     except Exception as exc:
-        _flask_app.logger.error("Google OAuth callback failed: %s", exc)
+        current_app.logger.error("Google OAuth callback failed: %s", exc)
         flash("تعذر إكمال تسجيل الدخول بـ Google", "danger")
         return redirect(url_for("auth.login"))
 

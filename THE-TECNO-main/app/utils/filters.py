@@ -21,8 +21,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from services.pricing import display_price_text
-from utils.i18n import package_public_name
+from app.services.pricing import display_price_text
+from app.utils.i18n import package_public_name
 
 
 def public_package_name_filter(value):
