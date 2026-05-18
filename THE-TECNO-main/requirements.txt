@@ -24,3 +24,11 @@ python-json-logger==2.0.7
 # sanitize.py imports bleach but the dep was never added to requirements,
 # so CI fails on a clean runner. Pin to a stable 6.x.
 bleach==6.2.0
+
+
+# V72 (Postgres migration phase 1): SQLAlchemy ORM layer + Postgres driver.
+# These are pulled in as the foundation for moving off SQLite.
+# Until DATABASE_URL is set to postgresql://..., the ORM continues to read
+# from the existing SQLite file — nothing breaks.
+SQLAlchemy==2.0.36
+psycopg2-binary==2.9.10
