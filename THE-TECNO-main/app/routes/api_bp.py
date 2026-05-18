@@ -392,13 +392,14 @@ def register():
             log.warning(
                 "api_register verification email failed for %s: %s", email, exc
             )
+            # V69: only triggers when RQ enqueue AND sync fallback both fail.
             return jsonify(
                 {
                     "ok": True,
                     "message": (
-                        "تم إنشاء الحساب، لكن لم يتم إرسال بريد التفعيل. "
-                        "افحص إعدادات Gmail App Password في ملف .env، ثم "
-                        "استخدم إعادة إرسال رابط التفعيل."
+                        "تم إنشاء الحساب، لكن تعذّر إرسال بريد التفعيل الآن. "
+                        "تحقّق من إعدادات SMTP في ملف .env، ثم استخدم "
+                        "\"إعادة إرسال رابط التفعيل\"."
                     ),
                 }
             )

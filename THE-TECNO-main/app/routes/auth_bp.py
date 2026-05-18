@@ -172,10 +172,14 @@ def register():
                     user = get_user_by_email(email)
                     if user:
                         set_user_email_token(user["id"], token)
+                    # V69: this branch is now rare — _enqueue_transactional
+                    # only raises if BOTH the RQ enqueue and the synchronous
+                    # SMTP fallback failed. That's almost always a missing /
+                    # wrong SMTP configuration, hence the .env hint.
                     flash(
-                        "تم إنشاء الحساب، لكن لم يتم إرسال بريد التفعيل. افحص "
-                        "إعدادات Gmail App Password في ملف .env، ثم استخدم "
-                        "إعادة إرسال رابط التفعيل.",
+                        "تم إنشاء الحساب، لكن تعذّر إرسال بريد التفعيل الآن. "
+                        "تحقّق من إعدادات SMTP في ملف .env (Gmail App "
+                        "Password)، ثم استخدم \"إعادة إرسال رابط التفعيل\".",
                         "warning",
                     )
                 return redirect("/login")
@@ -222,7 +226,13 @@ def resend_verification():
                 send_verification_email(email, token)
                 flash("تم إرسال رابط تفعيل جديد إلى بريدك.", "success")
             except Exception as exc:
-                flash(f"تعذر إرسال رابط التفعيل: {exc}", "danger")
+                # V69: rare double-failure (RQ + sync fallback). Don't echo
+                # the raw exception to the user.
+                log.warning("resend verification email failed for %s: %s", email, exc)
+                flash(
+                    "تعذّر إرسال رابط التفعيل الآن. حاول مجددًا بعد قليل.",
+                    "danger",
+                )
         else:
             flash(
                 "إذا كان البريد مسجلًا وغير مفعل، سيتم إرسال رابط تفعيل.",
@@ -247,7 +257,13 @@ def forgot_password():
             try:
                 send_password_reset_email(email, token)
             except Exception as exc:
-                flash(f"تعذر إرسال رابط الاستعادة: {exc}", "danger")
+                # V69: with async dispatch this only fires when BOTH the
+                # RQ enqueue and the sync fallback fail. Log + soft-warn.
+                log.warning("password reset email failed for %s: %s", email, exc)
+                flash(
+                    "حدث خطأ أثناء إرسال رابط الاستعادة. حاول مجددًا بعد قليل.",
+                    "danger",
+                )
                 return redirect(url_for("auth.forgot_password"))
         flash("إذا كان البريد مسجلًا، أرسلنا رابط استعادة كلمة المرور.", "info")
         return redirect("/login")
