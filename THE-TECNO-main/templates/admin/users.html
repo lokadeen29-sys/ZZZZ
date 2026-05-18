@@ -9,7 +9,7 @@
       <input name="q" value="{{ q or '' }}" placeholder="ID أو الاسم أو البريد أو رقم الهاتف أو ID اللاعب">
     </label>
     <button class="btn primary" type="submit">بحث</button>
-    <a class="btn" href="{{ url_for('admin_users') }}">إظهار الكل</a>
+    <a class="btn" href="{{ url_for('admin.users') }}">إظهار الكل</a>
   </form>
 
   <div class="table-wrap">
@@ -23,10 +23,10 @@
           <td>{{ u.email }}</td>
           <td>{{ u.role }}</td>
           <td>{{ wallet_money(u.balance) }}</td>
-          <td><a class="btn small" href="{{ url_for('admin_user_detail', user_id=u.id) }}">عرض العمليات</a></td>
+          <td><a class="btn small" href="{{ url_for('admin.user_detail', user_id=u.id) }}">عرض العمليات</a></td>
           <td>
             {# V49.1: currency selector (USD default, SYP converted via current rate) #}
-            <form method="post" action="{{ url_for('admin_user_balance', user_id=u.id) }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <form method="post" action="{{ url_for('admin.user_balance', user_id=u.id) }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input name="amount" placeholder="الرصيد الجديد" style="min-width:120px" inputmode="decimal" required>
               <select name="currency" style="min-width:90px" title="عملة المبلغ المُدخَل">

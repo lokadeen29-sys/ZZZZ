@@ -51,7 +51,7 @@
 <div class="card" style="margin-top:22px">
   <h2>تعديل الأسعار اليدوية بالليرة لهذه الباقات</h2>
   <p class="muted">هذه الحقول تظهر للأدمن فقط.</p>
-  <form method="post" action="{{ url_for('admin_update_manual_syp_prices', provider=provider, game_key=game.game_key) }}">
+  <form method="post" action="{{ url_for('admin.update_manual_syp_prices', provider=provider, game_key=game.game_key) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="table-wrap">
       <table>

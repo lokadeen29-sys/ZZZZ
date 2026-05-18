@@ -87,7 +87,7 @@
           <a href="{{ url_for('wallet.wallet_transactions') }}">{{ "Top-up requests" if is_en else "طلبات الشحن" }}</a>
           <a href="{{ url_for('public.orders') }}">{{ t("my_orders") }}</a>
           {% if current_user.role == 'admin' %}
-            <a href="{{ url_for('admin_dashboard') }}" style="color:var(--neon)">{{ "Admin" if is_en else "الإدارة" }}</a>
+            <a href="{{ url_for('admin.dashboard') }}" style="color:var(--neon)">{{ "Admin" if is_en else "الإدارة" }}</a>
           {% endif %}
         {% else %}
           <a href="{{ url_for('public.contact') }}">{{ "Support" if is_en else "الدعم" }}</a>
@@ -126,7 +126,7 @@
         <a href="{{ url_for('public.orders') }}">{{ t("my_orders") }}</a>
         <a href="{{ url_for('public.profile') }}">{{ "Profile" if is_en else "الملف الشخصي" }}</a>
         {% if current_user.role == 'admin' %}
-          <a href="{{ url_for('admin_dashboard') }}" style="color:var(--neon)">{{ "Admin" if is_en else "الإدارة" }}</a>
+          <a href="{{ url_for('admin.dashboard') }}" style="color:var(--neon)">{{ "Admin" if is_en else "الإدارة" }}</a>
         {% endif %}
       {% else %}
         <a href="{{ url_for('auth.login') }}">{{ t("login") }}</a>

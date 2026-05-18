@@ -11,7 +11,7 @@
 
   {# V44: Deposits get their own prominent priority section, separated from Settings. #}
   <div style="margin-top:24px">
-    <a class="card admin-priority-card" href="{{ url_for('admin_deposits', status='pending') }}"
+    <a class="card admin-priority-card" href="{{ url_for('admin.deposits', status='pending') }}"
        style="display:flex;align-items:center;justify-content:space-between;gap:16px;
               padding:22px 24px;border:2px solid hsl(var(--primary,260 80% 60%));
               background:linear-gradient(135deg, rgba(124,58,237,.18), rgba(6,182,212,.12));
@@ -25,13 +25,13 @@
   </div>
 
   <div class="grid three" style="margin-top:22px">
-    <a class="card" href="{{ url_for('admin_orders') }}"><h2>📦 الطلبات</h2><p class="muted">إدارة الطلبات وحالاتها</p></a>
-    <a class="card" href="{{ url_for('admin_users') }}"><h2>👥 المستخدمون</h2><p class="muted">تعديل أرصدة المستخدمين</p></a>
-    <a class="card" href="{{ url_for('admin_balances') }}"><h2>💰 أرصدة السيرفرات</h2><p class="muted">استعلام رصيد سيرفر 1 وسيرفر 2</p></a>
-    <a class="card" href="{{ url_for('admin_payment_methods') }}"><h2>💳 طرق الدفع</h2><p class="muted">تعديل العناوين والتعليمات</p></a>
-    <a class="card" href="{{ url_for('admin_games') }}"><h2>🎮 الألعاب والباقات</h2><p class="muted">صور الألعاب وترتيب الباقات</p></a>
-    <a class="card" href="{{ url_for('admin_accounting') }}"><h2>📊 الأرباح</h2><p class="muted">لوحة الأرباح والمبيعات</p></a>
-    <a class="card" href="{{ url_for('admin_settings') }}"><h2>⚙️ الإعدادات</h2><p class="muted">الإعدادات العامة (نسبة الربح، صرف الدولار…)</p></a>
+    <a class="card" href="{{ url_for('admin.orders') }}"><h2>📦 الطلبات</h2><p class="muted">إدارة الطلبات وحالاتها</p></a>
+    <a class="card" href="{{ url_for('admin.users') }}"><h2>👥 المستخدمون</h2><p class="muted">تعديل أرصدة المستخدمين</p></a>
+    <a class="card" href="{{ url_for('admin.balances') }}"><h2>💰 أرصدة السيرفرات</h2><p class="muted">استعلام رصيد سيرفر 1 وسيرفر 2</p></a>
+    <a class="card" href="{{ url_for('admin.payment_methods') }}"><h2>💳 طرق الدفع</h2><p class="muted">تعديل العناوين والتعليمات</p></a>
+    <a class="card" href="{{ url_for('admin.games') }}"><h2>🎮 الألعاب والباقات</h2><p class="muted">صور الألعاب وترتيب الباقات</p></a>
+    <a class="card" href="{{ url_for('admin.accounting') }}"><h2>📊 الأرباح</h2><p class="muted">لوحة الأرباح والمبيعات</p></a>
+    <a class="card" href="{{ url_for('admin.settings') }}"><h2>⚙️ الإعدادات</h2><p class="muted">الإعدادات العامة (نسبة الربح، صرف الدولار…)</p></a>
   </div>
 
   {# V51 task B: Admin 2FA security card #}
@@ -54,7 +54,7 @@
       {% if current_user and current_user.totp_enabled %}
         <details style="flex:0 0 auto">
           <summary class="btn" style="cursor:pointer">إدارة</summary>
-          <form method="post" action="{{ url_for('admin_2fa_regenerate_backup_codes') }}"
+          <form method="post" action="{{ url_for('admin_2fa.regenerate_backup_codes') }}"
                 style="margin-top:12px;background:rgba(255,255,255,.04);padding:12px;border-radius:10px">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label style="font-size:13px">رمز TOTP الحالي</label>
@@ -65,7 +65,7 @@
               توليد رموز استرداد جديدة
             </button>
           </form>
-          <form method="post" action="{{ url_for('admin_2fa_disable') }}"
+          <form method="post" action="{{ url_for('admin_2fa.disable') }}"
                 style="margin-top:10px;background:rgba(239,68,68,.06);padding:12px;border-radius:10px;border:1px solid rgba(239,68,68,.25)">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label style="font-size:13px">كلمة المرور</label>
@@ -79,7 +79,7 @@
           </form>
         </details>
       {% else %}
-        <a href="{{ url_for('admin_2fa_setup') }}" class="btn primary">تفعيل الآن</a>
+        <a href="{{ url_for('admin_2fa.setup') }}" class="btn primary">تفعيل الآن</a>
       {% endif %}
     </div>
   </div>

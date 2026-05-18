@@ -12,7 +12,7 @@
    setups (particularly with CSP + async form submission) submit an EMPTY
    body — which made "save visible games" look like a no-op: the handler
    deactivated every game because getlist('active_game') returned []. #}
-<form id="activeGamesForm" method="post" action="{{ url_for('admin_games') }}">
+<form id="activeGamesForm" method="post" action="{{ url_for('admin.games') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
 <div class="card admin-card">
@@ -78,7 +78,7 @@
 
               <img src="{{ game_image(g) }}" alt="{{ g.name }}" loading="lazy"
                    style="width:42px;height:42px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.12)">
-              <a class="btn small" href="{{ url_for('admin_game_products', provider=g.provider, game_key=g.game_key) }}">ترتيب الباقات</a>
+              <a class="btn small" href="{{ url_for('admin.game_products', provider=g.provider, game_key=g.game_key) }}">ترتيب الباقات</a>
             </div>
           </div>
         {% else %}
@@ -135,7 +135,7 @@
 
               <img src="{{ game_image(g) }}" alt="{{ g.name }}" loading="lazy"
                    style="width:42px;height:42px;object-fit:cover;border-radius:10px;border:1px solid rgba(255,255,255,.12)">
-              <a class="btn small" href="{{ url_for('admin_game_products', provider=g.provider, game_key=g.game_key) }}">ترتيب الباقات</a>
+              <a class="btn small" href="{{ url_for('admin.game_products', provider=g.provider, game_key=g.game_key) }}">ترتيب الباقات</a>
             </div>
           </div>
         {% else %}
@@ -171,7 +171,7 @@
           <b>{{ g.emoji or '🎮' }} {{ g.name }}</b>
           <span class="muted">({{ g.provider }} / {{ g.game_key }})</span>
         </div>
-        <form method="post" action="{{ url_for('admin_game_image', provider=g.provider, game_key=g.game_key) }}" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <form method="post" action="{{ url_for('admin.game_image', provider=g.provider, game_key=g.game_key) }}" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="file" name="image" accept="image/*" style="max-width:180px">
           <input type="text" name="image_url" placeholder="أو رابط صورة" style="max-width:220px">
@@ -184,7 +184,7 @@
 
 <h2>إضافة/تفعيل لعبة من المزود يدويًا</h2>
 <div class="card">
-  <form method="post" action="{{ url_for('admin_add_game') }}" class="grid-form">
+  <form method="post" action="{{ url_for('admin.add_game') }}" class="grid-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>المزود
       <select name="provider">

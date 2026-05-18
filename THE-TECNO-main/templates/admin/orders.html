@@ -8,35 +8,35 @@
   {% set ap = active_provider or primary_provider %}
   <div class="provider-tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
     <a class="provider-tab {% if ap=='server2' %}is-active{% endif %}"
-       href="{{ url_for('admin_orders', status=status, provider='server2') }}">
+       href="{{ url_for('admin.orders', status=status, provider='server2') }}">
       🟢 Shop2Topup
       {% if primary_provider=='server2' %}<span class="provider-tab-pill">الأساسي</span>{% endif %}
     </a>
     <a class="provider-tab {% if ap=='server1' %}is-active{% endif %}"
-       href="{{ url_for('admin_orders', status=status, provider='server1') }}">
+       href="{{ url_for('admin.orders', status=status, provider='server1') }}">
       🔵 G2Bulk
       {% if primary_provider=='server1' %}<span class="provider-tab-pill">الأساسي</span>{% endif %}
     </a>
     <a class="provider-tab {% if ap=='all' %}is-active{% endif %}"
-       href="{{ url_for('admin_orders', status=status, provider='all') }}">
+       href="{{ url_for('admin.orders', status=status, provider='all') }}">
       الكل
     </a>
   </div>
 
   <div class="links" style="margin-bottom:16px">
-    <a class="btn" href="{{ url_for('admin_orders', provider=ap) }}">جميع الحالات</a>
-    <a class="btn" href="{{ url_for('admin_orders', status='waiting', provider=ap) }}">بانتظار التنفيذ</a>
-    <a class="btn" href="{{ url_for('admin_orders', status='processing', provider=ap) }}">جاري التنفيذ</a>
-    <a class="btn" href="{{ url_for('admin_orders', status='supplier_pending', provider=ap) }}">عند المورد</a>
-    <a class="btn" href="{{ url_for('admin_orders', status='manual_pending', provider=ap) }}">تنفيذ يدوي</a>
-    <a class="btn" href="{{ url_for('admin_orders', status='completed', provider=ap) }}">مكتملة</a>
-    <a class="btn" href="{{ url_for('admin_orders', status='rejected', provider=ap) }}">مرفوضة</a>
+    <a class="btn" href="{{ url_for('admin.orders', provider=ap) }}">جميع الحالات</a>
+    <a class="btn" href="{{ url_for('admin.orders', status='waiting', provider=ap) }}">بانتظار التنفيذ</a>
+    <a class="btn" href="{{ url_for('admin.orders', status='processing', provider=ap) }}">جاري التنفيذ</a>
+    <a class="btn" href="{{ url_for('admin.orders', status='supplier_pending', provider=ap) }}">عند المورد</a>
+    <a class="btn" href="{{ url_for('admin.orders', status='manual_pending', provider=ap) }}">تنفيذ يدوي</a>
+    <a class="btn" href="{{ url_for('admin.orders', status='completed', provider=ap) }}">مكتملة</a>
+    <a class="btn" href="{{ url_for('admin.orders', status='rejected', provider=ap) }}">مرفوضة</a>
   </div>
 
   {# V67: manual sweep — asks each supplier for the latest status of every
      pending order. Use this to immediately unstick "جاري التنفيذ" rows
      instead of waiting for the periodic poller. #}
-  <form method="post" action="{{ url_for('admin_refresh_pending_orders') }}" style="margin-bottom:16px">
+  <form method="post" action="{{ url_for('admin.refresh_pending_orders') }}" style="margin-bottom:16px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button class="btn primary" type="submit" data-loading="جارٍ التحديث...">🔄 تحديث حالات الطلبات الآن</button>
     <span class="muted" style="margin-inline-start:8px;font-size:12px">
@@ -113,17 +113,17 @@
                  when manual_pending was set because of a transient supplier
                  failure (network, rate-limit, wrong product mapping). #}
               {% if o.status in ('manual_pending', 'waiting', 'supplier_pending') %}
-                <form method="post" action="{{ url_for('admin_order_action', order_id=o.id, action='retry') }}" style="display:inline">
+                <form method="post" action="{{ url_for('admin.order_action', order_id=o.id, action='retry') }}" style="display:inline">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn" type="submit" title="إعادة الإرسال إلى المورد">🔁 إعادة المحاولة</button>
                 </form>
               {% endif %}
-              <form method="post" action="{{ url_for('admin_order_action', order_id=o.id, action='complete') }}" style="display:inline"
+              <form method="post" action="{{ url_for('admin.order_action', order_id=o.id, action='complete') }}" style="display:inline"
                     data-confirm="تأكيد إكمال الطلب {{ o.order_code }} يدوياً؟">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn success" type="submit">إكمال يدوي</button>
               </form>
-              <form method="post" action="{{ url_for('admin_order_action', order_id=o.id, action='reject') }}" style="display:inline"
+              <form method="post" action="{{ url_for('admin.order_action', order_id=o.id, action='reject') }}" style="display:inline"
                     data-confirm="تأكيد رفض الطلب {{ o.order_code }} وإرجاع الرصيد للمستخدم؟">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn danger" type="submit">رفض</button>
