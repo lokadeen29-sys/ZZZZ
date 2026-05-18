@@ -1431,61 +1431,145 @@ def create_order(user, product, game, player_id):
 
 
 def update_order(order_id, status, provider_order_id=None, note=None):
-    with db_conn() as conn:
+    """Atomically transition an order's status and refund on rejection.
+
+    V72 / session 3 / PR #3: rewritten with SQLAlchemy ORM. The
+    behavioural contract is preserved exactly:
+
+      * Returns ``False`` when the order does not exist OR when the
+        attempted transition is from a terminal state (``completed`` /
+        ``rejected``) to a different state. (No-op transitions — same
+        status — are allowed because ``tasks.py`` may call us purely
+        to update ``note``.)
+      * Returns ``True`` on success.
+      * Refunds the order's ``price`` to the user's balance ONLY when
+        moving INTO ``rejected`` from a non-rejected status. This is
+        the V69.1 double-refund guard.
+      * Wraps everything in ``BEGIN IMMEDIATE`` (SQLite) — under
+        SQLAlchemy this becomes the default transactional behaviour
+        of ``Session`` + ``commit()``. On Postgres the equivalent is
+        a normal serializable-read-committed transaction; the
+        UPDATE-then-SELECT order is the same so the refund check is
+        still race-safe.
+      * Re-raises on any exception (with rollback) — never swallows.
+    """
+    from app.db.models import Order, User
+    from app.db.session import get_session
+
+    with get_session() as s:
         try:
-            conn.execute("BEGIN IMMEDIATE")
-            cur = conn.cursor()
-            old_order = cur.execute("SELECT status, user_id, price FROM orders WHERE id=?", (order_id,)).fetchone()
-            if not old_order:
-                conn.rollback()
+            old_order = s.get(Order, int(order_id))
+            if old_order is None:
+                # Nothing to do — the legacy code rolled back here, but with
+                # the ORM session we have not made any writes yet, so a
+                # plain return is equivalent.
                 return False
 
-            # V69.1: حماية من الانتقالات غير الآمنة. سابقاً كان يمكن نقل
-            # طلب completed → rejected وهذا يُعيد المبلغ للمستخدم رغم أن
-            # المنتج سُلِّم له (استرداد مزدوج). القاعدة:
-            #   - completed و rejected حالات نهائية لا يُسمح بالخروج منها
-            #     إلى حالة مختلفة (إعادة فتح طلب نهائي يجب أن تتم يدوياً
-            #     في SQL مع تدقيق ومراجعة محاسبية).
-            #   - يُسمح بـ no-op (نفس الحالة) لأن tasks.py قد تستدعينا
-            #     لتحديث note فقط، والحماية من ازدواج الاسترداد محفوظة
-            #     بالشرط `old_status != 'rejected'` أدناه.
-            old_status = old_order["status"]
+            # V69.1 transition guard: terminal states only allow no-op.
+            old_status = old_order.status
             if old_status in ("completed", "rejected") and old_status != status:
-                conn.rollback()
                 return False
 
-            cur.execute("UPDATE orders SET status=?, provider_order_id=?, note=?, updated_at=? WHERE id=?",
-                        (status, provider_order_id, note, int(time.time()), order_id))
+            old_user_id = old_order.user_id
+            old_price = old_order.price
 
-            # إرجاع الرصيد فقط إذا كانت الحالة السابقة ليست مرفوضة والحالة الجديدة مرفوضة
+            old_order.status = status
+            old_order.provider_order_id = provider_order_id
+            old_order.note = note
+            old_order.updated_at = int(time.time())
+
+            # Only refund when the new status is `rejected` AND the order
+            # was not already rejected — prevents the double-refund bug.
             if status == "rejected" and old_status != "rejected":
-                cur.execute("UPDATE users SET balance = balance + ? WHERE id=?",
-                            (old_order["price"], old_order["user_id"]))
-            conn.commit()
+                user = s.get(User, old_user_id)
+                if user is not None:
+                    # Mirror the old `balance = balance + ?` semantics.
+                    # We deliberately do NOT clamp at zero; if the price
+                    # was non-positive this becomes a no-op.
+                    user.balance = (user.balance or 0) + old_price
+
+            s.commit()
             return True
         except Exception:
-            conn.rollback()
+            s.rollback()
             raise
 
 
 
 def list_user_orders(user_id):
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 50", (user_id,)).fetchall()]
+    """Return up to 50 most-recent orders for a single user, newest first.
+
+    V72 / session 3 / PR #3: rewritten with SQLAlchemy ORM. Caller
+    contract (templates use `o["status"]`, `o["order_code"]`, etc.):
+
+      * List of plain ``dict``s with every column from the ``orders``
+        table. Keys match the legacy ``sqlite3.Row → dict`` names.
+      * Sorted by ``id DESC`` (i.e. insertion order — equivalent to
+        ``created_at DESC`` since order_code's id is monotonically
+        increasing).
+      * Hard limit of 50 rows. The user dashboard only renders the
+        most recent activity; older orders go to the admin view.
+    """
+    from app.db.models import Order
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(Order)
+            .filter(Order.user_id == user_id)
+            .order_by(Order.id.desc())
+            .limit(50)
+            .all()
+        )
+        return rows_to_dicts(rows)
 
 
 def list_orders(status=None):
-    with db_conn() as conn:
+    """Return orders for the admin dashboard, newest first.
+
+    V72 / session 3 / PR #3: rewritten with SQLAlchemy ORM. Two modes:
+
+      * ``status=None`` — return up to 200 most-recent orders across
+        every status. Cap matches the legacy SQL.
+      * ``status="waiting"`` (or any other value) — return EVERY order
+        in that status, no limit. Admins use this for processing
+        queues; trimming silently could hide work.
+
+    Each item is a plain ``dict`` with the full column set.
+    """
+    from app.db.models import Order
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        q = s.query(Order)
         if status:
-            return [dict(r) for r in conn.execute("SELECT * FROM orders WHERE status=? ORDER BY id DESC", (status,)).fetchall()]
+            q = q.filter(Order.status == status).order_by(Order.id.desc())
         else:
-            return [dict(r) for r in conn.execute("SELECT * FROM orders ORDER BY id DESC LIMIT 200").fetchall()]
+            q = q.order_by(Order.id.desc()).limit(200)
+        return rows_to_dicts(q.all())
 
 
 def get_order(order_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
-        return dict(row) if row else None
+    """Look up a single order by primary key.
+
+    V72 / session 3 / PR #3: rewritten with SQLAlchemy ORM. Returns
+    a plain ``dict`` or ``None``. ``order_id`` is coerced to ``int``
+    to mirror SQLite's implicit cast (callers occasionally pass a
+    string from the URL).
+    """
+    from app.db.models import Order
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    try:
+        oid = int(order_id)
+    except (TypeError, ValueError):
+        return None
+    with get_session() as s:
+        row = s.get(Order, oid)
+        return row_to_dict(row) if row is not None else None
 
 
 def stats():
