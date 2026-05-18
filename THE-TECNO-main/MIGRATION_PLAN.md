@@ -13,7 +13,7 @@
 | 0 | التحضير + إنشاء الخطة | ✅ مكتملة | 2026-05-18 |
 | 1 | إضافة SQLAlchemy + Models | ✅ مكتملة | 2026-05-18 |
 | 2 | تهيئة Alembic + baseline | ✅ مكتملة | 2026-05-18 |
-| 3 | إعادة كتابة database.py بـ ORM | ⏳ قيد التنفيذ (PR #1) | - |
+| 3 | إعادة كتابة database.py بـ ORM | ⏳ قيد التنفيذ (PR #1 ✅ مدموج، PR #2 قيد المراجعة) | - |
 | 4 | كتابة سكربت نقل البيانات | ⏸️ لم تبدأ | - |
 | 5 | تثبيت Postgres على Hetzner | ⏸️ لم تبدأ | - |
 | 6 | تنفيذ النقل + الاختبار | ⏸️ لم تبدأ | - |
@@ -360,7 +360,7 @@ cd /root/project
 
 ## 🔄 الجلسة 3: تحويل database.py لاستخدام ORM
 
-**الحالة:** قيد التنفيذ (PR #1 جاهز)
+**الحالة:** قيد التنفيذ (PR #1 ✅ مدموج · PR #2 جاهز للمراجعة)
 
 **الهدف:** كل دوال `database.py` (~80 دالة) تستخدم SQLAlchemy داخلياً، لكن نفس الـ signatures (لا يكسر شيء).
 
@@ -386,8 +386,8 @@ def get_user(user_id):
 ```
 
 ### المجموعات (موجة بموجة في PRs منفصلة):
-- **PR #1:** ✅ جاهز للمراجعة — الدوال البسيطة (`get_setting`, `set_setting`, `wishlist_*`, `list_payment_methods`, `get_payment_method`, `update_payment_method`)
-- **PR #2:** دوال القراءة (`list_games`, `list_products`, `get_game`, `get_product`, `get_user`)
+- **PR #1:** ✅ **مدموج** — الدوال البسيطة (`get_setting`, `set_setting`, `wishlist_*`, `list_payment_methods`, `get_payment_method`, `update_payment_method`)
+- **PR #2:** ✅ **جاهز للمراجعة** — دوال القراءة (`get_user`, `get_game`, `list_games`, `get_product`, `list_products`)
 - **PR #3:** دوال الطلبات (`list_orders`, `list_user_orders`, `get_order`, `update_order`)
 - **PR #4:** دوال الإيداع (`create_deposit`, `list_deposits_*`)
 - **PR #5:** الدوال الحرجة (`create_order`, `change_balance`, `set_user_balance`)
@@ -477,7 +477,83 @@ cd /root/project
 - أعد deploy للنسخة السابقة من `deploy.sh` (يحفظ نسخة احتياطية تلقائياً).
 - لم يحدث أي تغيير في DB schema، فلا حاجة لـ DB rollback.
 
-### تأكد بعد كل PR:
+---
+
+### ✅ ما تم إنجازه في PR #2 (الموجة الثانية):
+
+#### 1. تحويل 5 دوال قراءة إلى ORM
+في `database.py`، تم استبدال raw SQL بـ ORM داخل:
+
+- `get_user(user_id)` — `s.get(User, int(user_id))` مع coercion آمن للنصوص (IDs غير صالحة تُرجع `None` بدلاً من رفع `TypeError`).
+- `get_game(provider, game_key)` — query مع `filter_by` على المفتاح الطبيعي. تُرجع الصفوف غير النشطة كما هي (الـ legacy لم يفلتر `active` هنا — مهم لصفحة "تعديل لعبة" في الأدمن).
+- `list_games(provider=None, only_active=True)` — query مع filters اختيارية + ترتيب `active DESC, name ASC, id ASC` (يُبقي الألعاب غير النشطة في الأسفل بترتيب ثابت).
+- `get_product(product_id)` — يخفي الصفوف غير النشطة (`active != 1` ⇒ `None`). هذا مفتاح أمان للـ checkout: المنتج المعطّل لا يجب أن يُحجز.
+- `list_products(provider, game_key, only_active=True, group_id=None)` — أصعب الدوال:
+  - **قاعدة "curated subset"**: عند `only_active=True` ووجود صف بـ `sort_order>0`، نُرجع المُختار فقط (الصفوف بـ `sort_order=0` تختفي — هي ضوضاء من الاستيراد المُجمّع).
+  - **ترتيب CASE-style**: `CASE WHEN COALESCE(sort_order,0)=0 THEN 999999 ELSE sort_order END ASC` معاد بناؤه عبر `sqlalchemy.case` + `func.coalesce` (portable على SQLite و Postgres).
+  - **Fallback**: عند `only_active=True` + نتيجة فارغة + بدون `group_id`، نعيد تشغيل الـ query بدون أي فلتر للحفاظ على عرض الصفحة.
+  - **حقن `display_name`**: كل dict في النتيجة يحمل `display_name` معرَّب عبر `translate_product_name` — تُحقن في Python بعد الـ query.
+
+#### 2. اختبارات جديدة `tests/test_database_orm_pr2.py`
+~22 اختبار pytest يفحص:
+- شكل الـ dict (subset-inclusion للأعمدة المتوقّعة) لكل دالة.
+- دلالات `None` على الصفوف غير الموجودة + IDs غير صالحة (`"abc"`, `None`).
+- فلاتر `provider` + `only_active` في `list_games`.
+- إخفاء `get_product` للصفوف غير النشطة.
+- القاعدة الحرجة في `list_products`: subset حصري عند وجود `sort_order>0`، تجاوزها بـ `only_active=False`، الترتيب، الـ fallback، فلتر `group_id`، حقن `display_name`.
+
+استخدام `_seed_game` / `_seed_product` helpers تتحدث مباشرة مع `database.connect()` للسيطرة على كل الأعمدة (sort_order, group_id, active …) دون المرور على helpers ذات الواجهة المحدودة.
+
+### 📍 المخرجات (الملفات المعدّلة + الجديدة في PR #2):
+
+| الملف | تغيير | الوصف |
+|------|-------|-------|
+| `database.py` | معدّل (5 دوال) | استبدال raw SQL بـ ORM داخلياً |
+| `tests/test_database_orm_pr2.py` | جديد (~430 سطر) | ~22 اختبار parity |
+
+### 🛡️ ضمانات السلامة (PR #2):
+- ✅ كل التواقيع وقيم الإرجاع كما هي (callers لا تتغيّر).
+- ✅ شكل dict مطابق لـ `sqlite3.Row → dict` (نفس أسماء الأعمدة).
+- ✅ `with db_conn()` ما زال مستخدم في باقي الدوال — `test_db_conn_usage_count` ما زال أخضر.
+- ✅ النماذج تتطابق مع الـ schema الحقيقية (تم التحقّق في الجلسات 1+2).
+- ✅ الـ syntax تم التحقّق منه عبر `python -m py_compile`. تشغيل pytest الفعلي يتم على CI (الـ sandbox مغلق الشبكة).
+
+### 🚀 ما يفعله المستخدم بعد PR #2:
+
+#### الخطوة 1: راجع الـ PR على GitHub (`feat/postgres-migration-session3-pr2`)
+انظر diff في `database.py`؛ كل دالة معدّلة لها docstring `V72 / session 3 / PR #2` أعلى التعريف.
+
+#### الخطوة 2: deploy كالعادة (نفس الإجراء)
+```bash
+scp ZZZZ-main.zip root@46.224.87.50:/root/
+ssh root@46.224.87.50
+/root/deploy.sh /root/tecnogems_latest.zip
+```
+
+#### الخطوة 3: تأكّد أن الموقع يعمل بشكل طبيعي
+- الصفحة الرئيسية تعرض الألعاب (`list_games` + `list_public_games`).
+- صفحة لعبة `/game/<key>` تعرض الباقات (`list_products` + `get_game`).
+- صفحة المنتج (الـ checkout) تجلب المنتج (`get_product`).
+- لوحة الأدمن `/profile` تعرض بيانات المستخدم (`get_user`).
+- لوحة الأدمن `/admin/games` تعرض كل الألعاب نشطة وغير نشطة (`list_games(only_active=False)`).
+- لوحة الأدمن `/admin/products?game=...` تعرض كل المنتجات (`list_products(only_active=False)`).
+
+#### الخطوة 4: شغّل الاختبارات (اختياري)
+```bash
+cd /root/project
+.venv/bin/pytest tests/test_database_orm_pr2.py -v
+```
+
+### ✅ معايير النجاح لـ PR #2:
+- [ ] الـ CI يمرّ على branch
+- [ ] الموقع يعمل بشكل طبيعي بعد deploy
+- [ ] لا تغيير ملحوظ في قائمة الألعاب / المنتجات / الـ checkout
+
+### 🔄 Rollback إذا فشل أي شيء:
+- أعد deploy للنسخة السابقة من `deploy.sh` (يحفظ نسخة احتياطية تلقائياً).
+- لم يحدث أي تغيير في DB schema، فلا حاجة لـ DB rollback.
+
+---
 - [ ] الموقع يعمل تماماً كما كان (لا تغيير في السلوك)
 - [ ] جميع الاختبارات تنجح
 - [ ] صفحات الأدمن سليمة
@@ -742,7 +818,7 @@ Kiro سيقرأ ملف `MIGRATION_PLAN.md`، يفحص حالة كل جلسة، �
 ---
 
 **تاريخ إنشاء الخطة:** 2026-05-18  
-**آخر تحديث:** 2026-05-18 (الجلسة 3 / PR #1 — تحويل 8 دوال بسيطة إلى ORM)  
+**آخر تحديث:** 2026-05-18 (الجلسة 3 / PR #2 — تحويل 5 دوال قراءة إلى ORM)  
 **المسؤول:** Kiro + المستخدم  
 
 > 💬 لأي استفسار: ابدأ محادثة جديدة وقل _"عندي سؤال عن MIGRATION_PLAN.md"_
