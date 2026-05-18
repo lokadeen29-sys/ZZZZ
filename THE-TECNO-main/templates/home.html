@@ -36,7 +36,7 @@
         {# V61: hero primary CTA now goes straight to the wallet top-up page —
            the previous "ابدأ الشحن" jumped to #games which surprised users
            who actually wanted to top up their balance. #}
-        <a href="{% if current_user %}{{ url_for('wallet') }}{% else %}{{ url_for('auth.login', next=url_for('wallet')) }}{% endif %}"
+        <a href="{% if current_user %}{{ url_for('wallet.wallet') }}{% else %}{{ url_for('auth.login', next=url_for('wallet.wallet')) }}{% endif %}"
            class="v60-btn v60-btn-primary">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2H5a2 2 0 0 1-2-2z"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2"/><path d="M17 14h.01"/></svg>
           {{ "Top up wallet" if is_en else "اشحن محفظتك" }}
@@ -229,7 +229,7 @@
              else "سجّل الآن واحصل على خصم 10% على أول عملية شحن، بالإضافة إلى نقاط مكافآت دائمة." }}
         </p>
         {% if current_user %}
-          <a class="v60-btn v60-btn-primary v60-cta-btn" href="{{ url_for('wallet') }}">
+          <a class="v60-btn v60-btn-primary v60-cta-btn" href="{{ url_for('wallet.wallet') }}">
             {{ "Top up now" if is_en else "ابدأ الشحن الآن" }}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
           </a>

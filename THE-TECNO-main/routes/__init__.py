@@ -1,14 +1,19 @@
 """V53 REFACTOR: Blueprint registration.
 
-Phase 1 extracted ``auth_bp``. Phase 2 adds ``oauth_bp`` (Google OAuth client,
+Phase 1 extracted ``auth_bp``. Phase 2 added ``oauth_bp`` (Google OAuth client,
 ``google_oauth_enabled`` template flag, root-scope ``/sw.js`` service worker).
-Future phases will register admin_bp, wallet_bp, public_bp, api_bp here —
-without further edits to app.py.
+Phase 3 adds ``public_bp`` (storefront / SEO / legal pages / proof file
+serving / language switcher) and ``wallet_bp`` (the user wallet + deposit
+form + transactions list).
 
-Import is deferred into ``register_blueprints()`` on purpose: ``auth_bp.py``
-does ``from app import …helpers…`` at module top, so it can only be imported
-*after* all helpers in app.py have been defined. app.py therefore calls
-``register_blueprints(app)`` at the very end of its module body.
+Future phases will register admin_bp, admin_2fa_bp, api_bp here — without
+further edits to app.py.
+
+Import is deferred into ``register_blueprints()`` on purpose: every
+extracted blueprint module does ``from app import …helpers…`` at module
+top, so it can only be imported *after* all helpers in app.py have been
+defined. app.py therefore calls ``register_blueprints(app)`` at the very
+end of its module body.
 """
 from __future__ import annotations
 
@@ -30,3 +35,18 @@ def register_blueprints(app, deps=None) -> None:
 
     from .auth_bp import bp as auth_bp
     app.register_blueprint(auth_bp)
+
+    # Phase 3: public-facing routes (home/dashboard/products/checkout/profile/
+    # orders/legal/sitemap/robots/manifest/language/legacy redirects/proof file
+    # serving) and the wallet (deposit form + transactions list).
+    #
+    # public_bp is registered before wallet_bp so the storefront surface area
+    # comes online first; the order is otherwise free since the URL spaces
+    # don't overlap. Both blueprints use namespaced endpoint names
+    # (``public.home``, ``wallet.wallet``, …) following the Phase 2
+    # auth_bp convention.
+    from .public_bp import bp as public_bp
+    app.register_blueprint(public_bp)
+
+    from .wallet_bp import bp as wallet_bp
+    app.register_blueprint(wallet_bp)

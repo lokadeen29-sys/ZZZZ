@@ -335,7 +335,7 @@ def login():
             # confirmation we wanted them to see. The navbar already shows
             # the user is logged in (balance pill, profile icon, logout),
             # so the flash is redundant.
-            return redirect(safe_next_url("home"))
+            return redirect(safe_next_url("public.home"))
         # V50 SECURITY (M10): log failed auth attempts for monitoring / fail2ban.
         log.warning(
             "Failed login attempt for email=%s from ip=%s",
@@ -380,7 +380,7 @@ def logout():
         )
     session.clear()
     flash("تم تسجيل الخروج", "info")
-    return redirect(url_for("home"))
+    return redirect(url_for("public.home"))
 
 
 # ---------------------------------------------------------------------------
@@ -394,10 +394,10 @@ def confirm_email_change(token):
     else:
         flash(error or "تعذر تغيير البريد", "danger")
     # If the user is logged in, send them back to their profile; otherwise
-    # to the login page. Endpoint names match the new blueprint namespacing
-    # — `auth.login` for this blueprint, `profile` (still in app.py until
-    # phase 3) for the public profile route.
-    return redirect(url_for("profile") if current_user() else url_for("auth.login"))
+    # to the login page. Endpoint names follow the per-blueprint convention
+    # established in phases 2 and 3 — `auth.login` for this blueprint and
+    # `public.profile` for the storefront profile route.
+    return redirect(url_for("public.profile") if current_user() else url_for("auth.login"))
 
 
 # ---------------------------------------------------------------------------
@@ -457,4 +457,4 @@ def auth_google_callback():
     session.permanent = True
     # V67.1: same as the password-login path — drop the noisy flash so it
     # cannot leak onto a later page (deposit-submitted screen, checkout, etc).
-    return redirect(safe_next_url("home"))
+    return redirect(safe_next_url("public.home"))

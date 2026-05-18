@@ -6,7 +6,7 @@
       <h1>{{ t("wallet_records") }}</h1>
       <p class="muted">تابع حالة طلبات {{ t("topup_wallet") }}: بانتظار، {{ t("completed") }}، أو {{ t("rejected") }}.</p>
     </div>
-    <a class="btn primary" href="{{ url_for('wallet') }}#deposit-card">{{ t("topup_wallet") }}</a>
+    <a class="btn primary" href="{{ url_for('wallet.wallet') }}#deposit-card">{{ t("topup_wallet") }}</a>
   </div>
 
   <div class="table-wrap">

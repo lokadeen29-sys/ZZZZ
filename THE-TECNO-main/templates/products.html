@@ -10,7 +10,7 @@
 <section class="page-head">
   <div>
     <nav class="tg-breadcrumb" aria-label="breadcrumb">
-      <a href="{{ url_for('home') }}">{{ "Home" if is_en else "الرئيسية" }}</a>
+      <a href="{{ url_for('public.home') }}">{{ "Home" if is_en else "الرئيسية" }}</a>
       <span>›</span>
       <span>{{ game.emoji or '🎮' }} {{ game.name }}{% if group %} - {{ group.name }}{% endif %}</span>
     </nav>
@@ -33,7 +33,7 @@
       <div class="product-bottom">
         <strong>{{ product_price(p, game) }}</strong>
         {% if current_user %}
-          <a class="btn primary" href="{{ url_for('checkout', product_id=p.id) }}">{{ t("buy") }}</a>
+          <a class="btn primary" href="{{ url_for('public.checkout', product_id=p.id) }}">{{ t("buy") }}</a>
         {% else %}
           <a class="btn primary" href="{{ url_for('auth.login', next=request.path) }}">{{ "Login to buy" if is_en else "سجل للشراء" }}</a>
         {% endif %}

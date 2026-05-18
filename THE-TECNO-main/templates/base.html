@@ -65,7 +65,7 @@
 
   <header class="v60-nav" id="v60-nav">
     <div class="v60-nav-inner">
-      <a class="v60-brand" href="{{ url_for('home') }}" aria-label="TecnoGems">
+      <a class="v60-brand" href="{{ url_for('public.home') }}" aria-label="TecnoGems">
         <span class="v60-brand-logo">
           {# Gamepad icon — same as the new design #}
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -81,26 +81,26 @@
 
       {# Desktop primary nav #}
       <nav class="v60-nav-links" aria-label="primary">
-        <a href="{{ url_for('home') }}#games">{{ "Games" if is_en else "الألعاب" }}</a>
+        <a href="{{ url_for('public.home') }}#games">{{ "Games" if is_en else "الألعاب" }}</a>
         {% if current_user %}
-          <a href="{{ url_for('wallet') }}">{{ t("topup_wallet") }}</a>
-          <a href="{{ url_for('wallet_transactions') }}">{{ "Top-up requests" if is_en else "طلبات الشحن" }}</a>
-          <a href="{{ url_for('orders') }}">{{ t("my_orders") }}</a>
+          <a href="{{ url_for('wallet.wallet') }}">{{ t("topup_wallet") }}</a>
+          <a href="{{ url_for('wallet.wallet_transactions') }}">{{ "Top-up requests" if is_en else "طلبات الشحن" }}</a>
+          <a href="{{ url_for('public.orders') }}">{{ t("my_orders") }}</a>
           {% if current_user.role == 'admin' %}
             <a href="{{ url_for('admin_dashboard') }}" style="color:var(--neon)">{{ "Admin" if is_en else "الإدارة" }}</a>
           {% endif %}
         {% else %}
-          <a href="{{ url_for('contact') }}">{{ "Support" if is_en else "الدعم" }}</a>
+          <a href="{{ url_for('public.contact') }}">{{ "Support" if is_en else "الدعم" }}</a>
         {% endif %}
       </nav>
 
       <div class="v60-nav-actions">
         {% if current_user %}
-          <a class="v60-nav-balance" href="{{ url_for('wallet') }}" title="{{ t('balance') }}">
+          <a class="v60-nav-balance" href="{{ url_for('wallet.wallet') }}" title="{{ t('balance') }}">
             <svg {{ _ico|safe }}><path d="M3 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2H5a2 2 0 0 1-2-2z"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V10a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2"/><path d="M17 14h.01"/></svg>
             <span id="tg-nav-balance" data-balance="{{ '%.2f'|format(current_user.balance|float) }}">{{ wallet_money(current_user.balance) }}</span>
           </a>
-          <a class="v60-btn v60-btn-glass" href="{{ url_for('profile') }}" title="{{ 'Profile' if is_en else 'الملف الشخصي' }}">
+          <a class="v60-btn v60-btn-glass" href="{{ url_for('public.profile') }}" title="{{ 'Profile' if is_en else 'الملف الشخصي' }}">
             <svg {{ _ico|safe }}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
           </a>
           <a id="tg-logout-link" class="v60-btn v60-btn-ghost" href="#" title="{{ t('logout') }}">
@@ -118,13 +118,13 @@
 
     {# Mobile menu panel #}
     <div class="v60-mobile-panel" id="v60-mobile-panel">
-      <a href="{{ url_for('home') }}#games">{{ "Games" if is_en else "الألعاب" }}</a>
-      <a href="{{ url_for('all_games') }}">{{ "All games" if is_en else "جميع الألعاب" }}</a>
+      <a href="{{ url_for('public.home') }}#games">{{ "Games" if is_en else "الألعاب" }}</a>
+      <a href="{{ url_for('public.all_games') }}">{{ "All games" if is_en else "جميع الألعاب" }}</a>
       {% if current_user %}
-        <a href="{{ url_for('wallet') }}">{{ t("topup_wallet") }}</a>
-        <a href="{{ url_for('wallet_transactions') }}">{{ "Top-up requests" if is_en else "طلبات الشحن" }}</a>
-        <a href="{{ url_for('orders') }}">{{ t("my_orders") }}</a>
-        <a href="{{ url_for('profile') }}">{{ "Profile" if is_en else "الملف الشخصي" }}</a>
+        <a href="{{ url_for('wallet.wallet') }}">{{ t("topup_wallet") }}</a>
+        <a href="{{ url_for('wallet.wallet_transactions') }}">{{ "Top-up requests" if is_en else "طلبات الشحن" }}</a>
+        <a href="{{ url_for('public.orders') }}">{{ t("my_orders") }}</a>
+        <a href="{{ url_for('public.profile') }}">{{ "Profile" if is_en else "الملف الشخصي" }}</a>
         {% if current_user.role == 'admin' %}
           <a href="{{ url_for('admin_dashboard') }}" style="color:var(--neon)">{{ "Admin" if is_en else "الإدارة" }}</a>
         {% endif %}
@@ -166,22 +166,22 @@
       </div>
       <div class="v60-footer-col">
         <h4>{{ "Quick links" if is_en else "روابط سريعة" }}</h4>
-        <a href="{{ url_for('home') }}#games">{{ "Games" if is_en else "الألعاب" }}</a>
-        <a href="{{ url_for('all_games') }}">{{ "All games" if is_en else "جميع الألعاب" }}</a>
-        {% if current_user %}<a href="{{ url_for('wallet') }}">{{ t("topup_wallet") }}</a>{% endif %}
-        <a href="{{ url_for('contact') }}">{{ "Contact us" if is_en else "تواصل معنا" }}</a>
+        <a href="{{ url_for('public.home') }}#games">{{ "Games" if is_en else "الألعاب" }}</a>
+        <a href="{{ url_for('public.all_games') }}">{{ "All games" if is_en else "جميع الألعاب" }}</a>
+        {% if current_user %}<a href="{{ url_for('wallet.wallet') }}">{{ t("topup_wallet") }}</a>{% endif %}
+        <a href="{{ url_for('public.contact') }}">{{ "Contact us" if is_en else "تواصل معنا" }}</a>
       </div>
       <div class="v60-footer-col">
         <h4>{{ "Support" if is_en else "الدعم" }}</h4>
         {% if whatsapp_number %}<a href="https://wa.me/{{ whatsapp_number }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}
         {% if telegram_username %}<a href="https://t.me/{{ telegram_username }}" target="_blank" rel="noopener">Telegram</a>{% endif %}
-        <a href="{{ url_for('contact') }}">{{ "Contact" if is_en else "اتصل بنا" }}</a>
-        <a href="{{ url_for('refund') }}">{{ "Refund" if is_en else "الاسترجاع" }}</a>
+        <a href="{{ url_for('public.contact') }}">{{ "Contact" if is_en else "اتصل بنا" }}</a>
+        <a href="{{ url_for('public.refund') }}">{{ "Refund" if is_en else "الاسترجاع" }}</a>
       </div>
       <div class="v60-footer-col">
         <h4>{{ "Legal" if is_en else "قانوني" }}</h4>
-        <a href="{{ url_for('privacy') }}">{{ "Privacy" if is_en else "الخصوصية" }}</a>
-        <a href="{{ url_for('terms') }}">{{ "Terms" if is_en else "الشروط" }}</a>
+        <a href="{{ url_for('public.privacy') }}">{{ "Privacy" if is_en else "الخصوصية" }}</a>
+        <a href="{{ url_for('public.terms') }}">{{ "Terms" if is_en else "الشروط" }}</a>
         <a href="{{ lang_url('en' if lang == 'ar' else 'ar') }}">{{ 'English' if lang == 'ar' else 'العربية' }}</a>
       </div>
     </div>

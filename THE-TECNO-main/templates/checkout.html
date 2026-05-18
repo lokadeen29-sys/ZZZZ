@@ -30,7 +30,7 @@
     {% else %}
     <div class="checkout-insufficient">
       ⚠️ {{ "Insufficient balance. " if is_en else "رصيدك غير كافٍ. " }}
-      <a href="{{ url_for('wallet') }}#deposit-card">{{ "Top up wallet →" if is_en else "اشحن المحفظة ←" }}</a>
+      <a href="{{ url_for('wallet.wallet') }}#deposit-card">{{ "Top up wallet →" if is_en else "اشحن المحفظة ←" }}</a>
     </div>
     {% endif %}
     {% endif %}
