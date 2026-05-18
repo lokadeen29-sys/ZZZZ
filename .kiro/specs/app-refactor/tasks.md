@@ -64,15 +64,59 @@ bridge will be deleted in Phase 5.
 ## Phase 2: Complete `auth_bp.py` (existing) + extract `oauth_bp.py`
 **Branch:** `refactor/phase-2-auth-oauth`
 
-- [ ] Audit current `routes/auth_bp.py` for missing routes vs. app.py
-- [ ] Move remaining auth routes (login, register, logout, password reset,
+- [x] Audit current `routes/auth_bp.py` for missing routes vs. app.py
+- [x] Move remaining auth routes (login, register, logout, password reset,
       verify-email, change-email confirm) into `auth_bp.py`
-- [ ] Create `app/routes/oauth_bp.py` (Google OAuth flow + `_inject_oauth_flags`
+- [x] Create `app/routes/oauth_bp.py` (Google OAuth flow + `_inject_oauth_flags`
       context processor)
-- [ ] Move `/sw.js` (service worker) into `oauth_bp.py` OR a tiny `misc_bp.py`
+- [x] Move `/sw.js` (service worker) into `oauth_bp.py` OR a tiny `misc_bp.py`
 - [ ] Smoke test: login, register, password reset email, Google login.
 
 **Acceptance:** All auth & OAuth routes live in their own blueprint files.
+
+**Phase 2 result (2026-05-18):** Phase 1 had already extracted /login,
+/register, /logout, /verify-email, /resend-verification, /forgot-password,
+/reset-password, /auth/google, /auth/google/callback. Phase 2 completed the
+remaining work:
+
+1. Added `/confirm-email-change/<token>` (endpoint
+   `auth.confirm_email_change`) to `routes/auth_bp.py` — the only auth
+   route still in `app.py`.
+2. Created `routes/oauth_bp.py` (Blueprint name: `oauth`). It owns:
+   - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI`
+     env reads (with the same `BASE_URL`-derived default as before).
+   - The Authlib `OAuth(app)` client, initialised lazily via
+     `init_oauth(app)` — so the client only binds when a live Flask
+     app exists (called from `routes.register_blueprints`).
+   - `bp.app_context_processor _inject_oauth_flags` (was
+     `@app.context_processor` in app.py — the new form is app-wide so
+     `templates/login.html` and `templates/register.html` keep rendering
+     the "Sign in with Google" button conditionally).
+   - `GET /sw.js` (root-scope service worker, endpoint
+     `oauth.service_worker`).
+3. `routes/auth_bp.py` no longer reaches into `app._oauth`. The OAuth
+   views now `from .oauth_bp import get_oauth, get_redirect_uri` lazily
+   inside the request handler.
+4. `routes/__init__.py register_blueprints(app)` now calls
+   `init_oauth(app)` and registers `oauth_bp` *before* `auth_bp`.
+5. `app.py` lost ~49 lines (OAuth client wiring, `/sw.js`, the
+   context processor, and the orphaned `confirm_email_change` route).
+   It gained a 25-line transitional bridge: re-exports
+   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_REDIRECT_URI`
+   from `routes.oauth_bp`, plus a PEP 562 module-level `__getattr__`
+   so `from app import _oauth` keeps returning the live (post-init)
+   client. Net: 3,099 → 3,075 lines.
+
+**Files added in Phase 2 (under `THE-TECNO-main/`):**
+- `routes/oauth_bp.py`
+
+**Files modified in Phase 2:**
+- `routes/auth_bp.py` (added `confirm_email_change` route; OAuth views now
+  use lazy import from `.oauth_bp` instead of `getattr(_app_module, …)`)
+- `routes/__init__.py` (register `oauth_bp` + call `init_oauth(app)`)
+- `app.py` (replaced OAuth/sw.js block with bridge; dropped
+  `confirm_email_change`; dropped `_inject_oauth_flags`)
+- `.kiro/specs/app-refactor/tasks.md` (this file)
 
 ---
 
@@ -171,6 +215,25 @@ bridge will be deleted in Phase 5.
   independently. `app.py` re-exports the names for the few callers that
   reference them (e.g. admin `test-email` route). Single source of truth
   in Phase 5 when `app.config` consumes them.
+- 2026-05-18 (Phase 2): **`_oauth` is exposed via PEP 562 `__getattr__`
+  on `app.py`, not as a module attribute.** The Authlib client is now
+  built inside `routes/oauth_bp.init_oauth(app)`, which runs after the
+  bridge `from routes.oauth_bp import …` has executed. A plain
+  `_oauth = None` re-export would freeze the value at `None` for any
+  `from app import _oauth` caller. The lazy `__getattr__("_oauth")`
+  defers the lookup so callers see the live, post-init client.
+- 2026-05-18 (Phase 2): **`_inject_oauth_flags` is registered with
+  `bp.app_context_processor`, not `bp.context_processor`.** The original
+  `@app.context_processor` was app-wide (every template, including
+  templates owned by other blueprints, gets `google_oauth_enabled`).
+  `bp.context_processor` would scope it to oauth_bp's own templates only,
+  which would break `templates/login.html` and `templates/register.html`.
+  `app_context_processor` preserves the original wide scope.
+- 2026-05-18 (Phase 2): **`oauth_bp` is registered *before* `auth_bp` in
+  `register_blueprints`.** That way `init_oauth(app)` runs first, so by
+  the time auth_bp's `/auth/google` view fires `get_oauth()` returns the
+  live client. The two blueprints have no overlapping URLs so the order
+  is otherwise free.
 
 ## Open Questions
 (answer before starting the relevant phase)
