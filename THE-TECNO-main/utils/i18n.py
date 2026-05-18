@@ -108,10 +108,10 @@ def tr(key):
 def lang_url(target):
     nxt = request.path
     if nxt.startswith("/lang/"):
-        nxt = url_for("home")
+        nxt = url_for("public.home")
     if request.query_string and not nxt.startswith("/lang/"):
         nxt = request.full_path
-    return url_for("set_language", lang=target, next=nxt)
+    return url_for("public.set_language", lang=target, next=nxt)
 
 
 def package_public_name(name):

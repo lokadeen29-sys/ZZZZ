@@ -2,7 +2,7 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <a class="muted" href="{{ url_for('home') }}">← العودة للألعاب</a>
+    <a class="muted" href="{{ url_for('public.home') }}">← العودة للألعاب</a>
     <h1>{{ game.emoji or '🎮' }} {{ game.name }}</h1>
     <p class="muted">اختر نوع الشحن المناسب.</p>
   </div>
@@ -14,7 +14,7 @@
 
 <div class="tg-game-grid">
   {% for g in groups %}
-    <a class="tg-game-card searchable-group" href="{{ url_for('products_group', provider=provider, game_key=game.game_key, group_id=g.id) }}">
+    <a class="tg-game-card searchable-group" href="{{ url_for('public.products_group', provider=provider, game_key=game.game_key, group_id=g.id) }}">
       <div class="tg-game-cover">
         {# V62.1 FIX: previously fell back to react-assets/games/pubg.jpg which
            made every imageless group look like PUBG. Use the game_image()

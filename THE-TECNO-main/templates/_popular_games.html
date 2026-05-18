@@ -34,7 +34,7 @@
         <div class="v60-featured-track">
           {% for g in featured_games[:8] %}
             <a class="v60-featured-card"
-               href="{{ url_for('products', provider=g.provider, game_key=g.game_key) }}"
+               href="{{ url_for('public.products', provider=g.provider, game_key=g.game_key) }}"
                aria-label="{{ g.name }}">
               <div class="v60-featured-cover">
                 <img src="{{ game_image(g) }}" alt="{{ g.name }}" loading="lazy" decoding="async" width="600" height="800">
@@ -64,7 +64,7 @@
       {% for g in featured_games %}
         <a class="v60-game-card searchable-game"
            data-name="{{ g.name|lower }}"
-           href="{{ url_for('products', provider=g.provider, game_key=g.game_key) }}"
+           href="{{ url_for('public.products', provider=g.provider, game_key=g.game_key) }}"
            aria-label="{{ g.name }}">
           <div class="v60-game-cover">
             <img src="{{ game_image(g) }}" alt="{{ g.name }}"
@@ -106,7 +106,7 @@
 
     {% if has_more_games %}
       <div style="text-align:center;margin-top:2.4rem">
-        <a href="{{ url_for('all_games') }}" class="v60-btn v60-btn-glass">
+        <a href="{{ url_for('public.all_games') }}" class="v60-btn v60-btn-glass">
           {{ "View all games" if is_en else "عرض جميع الألعاب" }}
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{% if is_en %}<polyline points="9 18 15 12 9 6"/>{% else %}<polyline points="15 18 9 12 15 6"/>{% endif %}</svg>
         </a>

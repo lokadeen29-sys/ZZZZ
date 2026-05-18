@@ -5,14 +5,14 @@
   {% if show_server1 or show_server2 %}
   <div class="grid two">
     {% if show_server1 %}
-    <a class="card server-card" href="{{ url_for('games', provider='server1') }}">
+    <a class="card server-card" href="{{ url_for('public.games', provider='server1') }}">
       <div class="game-thumb server">🖥️</div>
       <h2>سيرفر 1</h2>
       <p class="muted">الألعاب والباقات الخاصة بالسيرفر الأول.</p>
     </a>
     {% endif %}
     {% if show_server2 %}
-    <a class="card server-card" href="{{ url_for('games', provider='server2') }}">
+    <a class="card server-card" href="{{ url_for('public.games', provider='server2') }}">
       <div class="game-thumb server">🚀</div>
       <h2>سيرفر 2</h2>
       <p class="muted">Free Fire و PUBG Mobile.</p>

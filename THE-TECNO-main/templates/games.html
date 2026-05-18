@@ -18,7 +18,7 @@
       {% set img = game_image(g) if game_image is defined else (g.image_url if g.image_url else url_for('static', filename='img/games-neon/game-pubg.jpg')) %}
       <a class="v60-game-card searchable-game"
          data-name="{{ g.name|lower }}"
-         href="{{ url_for('products', provider=provider, game_key=g.game_key) }}">
+         href="{{ url_for('public.products', provider=provider, game_key=g.game_key) }}">
         <div class="v60-game-cover">
           <img src="{{ img }}" alt="{{ g.name }}" loading="{% if loop.index <= 8 %}eager{% else %}lazy{% endif %}" decoding="async" width="600" height="800">
           <div class="v60-game-cover-fade"></div>

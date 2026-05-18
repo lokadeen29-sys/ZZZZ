@@ -7,8 +7,8 @@
       <p class="muted">رصيدك الحالي</p>
       <div class="price">{{ wallet_money(current_user.balance) }}</div>
       <div class="links" style="margin-top:18px">
-        <a class="btn primary" href="{{ url_for('servers') }}">شراء باقة</a>
-        <a class="btn" href="{{ url_for('wallet') }}">شحن المحفظة</a>
+        <a class="btn primary" href="{{ url_for('public.servers') }}">شراء باقة</a>
+        <a class="btn" href="{{ url_for('wallet.wallet') }}">شحن المحفظة</a>
       </div>
     </div>
     <div class="card">

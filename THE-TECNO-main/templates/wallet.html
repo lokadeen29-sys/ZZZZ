@@ -17,7 +17,7 @@
         </div>
         <div class="tg-deposit-toast__desc">
           طلبك الآن قيد المراجعة من قبل الإدارة، وسيُضاف الرصيد إلى محفظتك فور الموافقة.
-          <a href="{{ url_for('wallet_transactions') }}" class="tg-deposit-toast__link">متابعة حالة الطلب</a>
+          <a href="{{ url_for('wallet.wallet_transactions') }}" class="tg-deposit-toast__link">متابعة حالة الطلب</a>
         </div>
       </div>
     </div>
@@ -32,7 +32,7 @@
       <div class="price">{{ wallet_money(current_user.balance) }}</div>
       <p>{{ t("support") }}: <strong>{{ support }}</strong></p>
       <div class="links">
-        <a class="btn" href="{{ url_for('wallet_transactions') }}">{{ t("wallet_records") }}</a>
+        <a class="btn" href="{{ url_for('wallet.wallet_transactions') }}">{{ t("wallet_records") }}</a>
       </div>
     </div>
 

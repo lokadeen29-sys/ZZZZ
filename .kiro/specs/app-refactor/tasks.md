@@ -124,17 +124,69 @@ remaining work:
 **Branch:** `refactor/phase-3-public-wallet`
 **Estimated diff:** ~700 lines moved
 
-- [ ] Create `app/routes/public_bp.py`:
+- [x] Create `app/routes/public_bp.py`:
       home, dashboard, servers, games, all_games, products, products_group,
-      checkout, profile, confirm_email_change, orders, legal pages
+      checkout, profile, orders, legal pages
       (privacy, terms, refund, contact), robots.txt, manifest.json,
       sitemap.xml, legacy_redirect, serve_proof, _block_static_uploads,
       email_info, reset_lang, set_language.
-- [ ] Create `app/routes/wallet_bp.py`:
+- [x] Create `app/routes/wallet_bp.py`:
       wallet, wallet_transactions.
 - [ ] Smoke test: full purchase flow, deposit flow, all legal pages render.
 
 **Acceptance:** Public-facing routes are out of `app.py`.
+
+**Phase 3 result (2026-05-18):** `app.py` shrank from 3,075 to **2,530 lines**
+(−545 lines, −18%). The two new blueprint files together contribute 832
+lines (`routes/public_bp.py` 649 + `routes/wallet_bp.py` 183) — both
+include a comment header documenting which routes they own and the
+endpoint-naming convention.
+
+**Endpoint convention:** namespaced (`public.home`, `public.products`,
+`wallet.wallet`, …) following the Phase 2 `auth_bp` pattern. 76
+`url_for(...)` references across templates and Python files were updated
+in the same commit:
+
+- 54 in 18 templates (base.html, home.html, all_games.html, checkout.html,
+  dashboard.html, games.html, orders.html, products.html, product_groups.html,
+  privacy.html, refund.html, servers.html, terms.html, wallet.html,
+  wallet_transactions.html, _popular_games.html, 404.html, 500.html)
+- 4 in `app.py` (CSRF error handler `safe_next_url("home")` →
+  `safe_next_url("public.home")`; `safe_next_url` default endpoint
+  similarly; `admin_update_manual_syp_prices` redirects to
+  `public.products`)
+- 3 in `routes/auth_bp.py` (logout → `public.home`,
+  `confirm_email_change` → `public.profile`)
+- 2 in `utils/i18n.py` (`lang_url()` now references
+  `public.home` / `public.set_language`)
+
+**`/games` route subtlety:** the original `app.py` had **two** `/games`
+routes — `def games(provider)` mapped to `/games/<provider>` and
+`def games_index()` mapped to `/games` (a redirect to home). Both
+moved to `public_bp` with namespaced names — `public.games` and
+`public.games_index` respectively — and Flask's URL matching keeps
+them disambiguated by the `<provider>` segment.
+
+**Decorator preservation:** every decorator/rate-limit/login_required
+annotation was moved verbatim. Only one route (`/checkout`) carried a
+rate limit (`@(limiter.limit("20 per minute") if limiter else
+(lambda f: f))`); it's now expressed via the `_rl("20 per minute")`
+helper, mirroring the same shim used in `routes/auth_bp.py` so the
+behaviour is identical (no-op when `Flask-Limiter` is missing).
+
+**Files added in Phase 3 (under `THE-TECNO-main/`):**
+- `routes/public_bp.py`
+- `routes/wallet_bp.py`
+
+**Files modified in Phase 3:**
+- `app.py` (removed extracted route blocks; updated CSRF error handler
+  + `safe_next_url` default; updated `admin_update_manual_syp_prices`
+  redirects)
+- `routes/__init__.py` (register `public_bp` and `wallet_bp`)
+- `routes/auth_bp.py` (logout / confirm_email_change endpoint names)
+- `utils/i18n.py` (`lang_url()` endpoint names)
+- 18 templates under `templates/`
+- `.kiro/specs/app-refactor/tasks.md` (this file)
 
 ---
 
@@ -234,6 +286,36 @@ remaining work:
   the time auth_bp's `/auth/google` view fires `get_oauth()` returns the
   live client. The two blueprints have no overlapping URLs so the order
   is otherwise free.
+- 2026-05-18 (Phase 3): **Endpoint names are namespaced via blueprint
+  prefix** (e.g. `public.home`, `public.products`, `wallet.wallet`).
+  Following the Phase 2 `auth_bp` precedent, every `url_for()` caller in
+  templates and Python files was updated in the same commit. The bare
+  endpoint names (`url_for("home")`) no longer resolve. This is the
+  cleanest path because Flask's `Blueprint` always prefixes endpoints
+  and there is no public API to opt out — keeping bare names would
+  require declaring routes via `app.add_url_rule` directly, which would
+  defeat the point of using Blueprints for this refactor.
+- 2026-05-18 (Phase 3): **`safe_next_url()`'s default endpoint changed
+  from `"home"` to `"public.home"`.** Every existing caller passes the
+  endpoint name explicitly, so the default is theoretical — but leaving
+  the stale string would crash `url_for` if any future caller relied on
+  the default. Updated in the same commit alongside the namespaced
+  references.
+- 2026-05-18 (Phase 3): **No bridge re-exports for the moved view
+  functions.** Phase 1 introduced `from app import send_email, tr, …`
+  re-exports because those *helpers* are imported by name from many
+  modules. View functions, by contrast, are referenced exclusively
+  through Flask's URL routing (`url_for`) and the blueprint endpoint
+  registry. A `grep` for `from app import home` (or any other moved
+  view name) returned zero matches across the codebase, so no bridge
+  is needed. The transitional comment block left in `app.py` documents
+  what moved and where.
+- 2026-05-18 (Phase 3): **`current_app.config["UPLOAD_FOLDER"]` instead
+  of `app.config[...]` inside `serve_proof`.** The original `app.py`
+  reference relied on the module-level `app` symbol; inside a
+  blueprint, the live application is accessed via `flask.current_app`
+  to keep the module decoupled from the specific app object (and to
+  align with the Application Factory direction in Phase 5).
 
 ## Open Questions
 (answer before starting the relevant phase)

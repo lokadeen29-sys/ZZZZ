@@ -61,7 +61,7 @@
   {% else %}
   <div class="empty-state">
     <p>{{ "No orders yet." if is_en else "لا توجد طلبات بعد." }}</p>
-    <a class="btn primary" href="{{ url_for('home') }}">{{ "Browse Games" if is_en else "تصفح الألعاب" }}</a>
+    <a class="btn primary" href="{{ url_for('public.home') }}">{{ "Browse Games" if is_en else "تصفح الألعاب" }}</a>
   </div>
   {% endif %}
 </section>
