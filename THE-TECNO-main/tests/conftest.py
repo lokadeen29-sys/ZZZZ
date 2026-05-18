@@ -107,6 +107,14 @@ def app(tmp_path, monkeypatch):
     # fresh DB file (otherwise the module-global says "already done").
     database._PRAGMAS_APPLIED = False
 
+    # V72 / session 3: rebuild the SQLAlchemy engine + session factory
+    # against the per-test DB. `app.db.base` reads `DATABASE_URL` only at
+    # import time (and it may have already been imported by an earlier
+    # test pointing at a different tmp dir), so an explicit reset is
+    # required for ORM-backed code to see the right DB.
+    from app.db import base as _db_base
+    _db_base.reset_engine()
+
     import app as app_module  # noqa: E402
 
     flask_app = app_module.app

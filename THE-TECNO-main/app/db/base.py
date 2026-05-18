@@ -9,6 +9,11 @@ The engine is configured from `DATABASE_URL`:
   * `postgresql://...`: when set, the same code talks to Postgres instead.
     Switching is a one-line change in `.env` (no code rebuild needed).
 
+  * Bare filesystem path (no scheme): coerced to ``sqlite:///<path>``.
+    This is purely a quality-of-life feature for the test harness which
+    monkey-patches ``DATABASE_URL`` to a tmp file path; production code
+    still ships a fully-qualified URL.
+
 Important pragmas / connect args:
 
   * SQLite needs `check_same_thread=False` because Flask shares
@@ -16,6 +21,14 @@ Important pragmas / connect args:
   * `pool_pre_ping=True` makes the engine recycle dead connections
     transparently. Critical on Postgres where idle connections can be
     closed by the server / load balancer.
+
+Engine lifecycle:
+
+  The engine and session factory are module-level singletons resolved at
+  import time from the *current* environment. Tests that need to point
+  the ORM at a different DB after import can call :func:`reset_engine`
+  to dispose the old engine and rebuild it from the (now-monkeypatched)
+  ``DATABASE_URL``.
 """
 
 from __future__ import annotations
@@ -42,11 +55,28 @@ _DEFAULT_SQLITE_PATH = os.path.join(
     "data",
     "site.db",
 )
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip() or f"sqlite:///{_DEFAULT_SQLITE_PATH}"
+
+
+def _resolve_database_url() -> str:
+    """Read ``DATABASE_URL`` from env (or fall back to SQLite default).
+
+    Accepts three forms:
+      * ``""`` / unset → SQLite at ``data/site.db`` (default).
+      * Anything containing ``://`` → used verbatim (postgresql://, sqlite:///, …).
+      * Bare filesystem path → wrapped as ``sqlite:///<path>``. Used by
+        the test harness which sets ``DATABASE_URL=/tmp/.../test.db``.
+    """
+    raw = os.getenv("DATABASE_URL", "").strip()
+    if not raw:
+        return f"sqlite:///{_DEFAULT_SQLITE_PATH}"
+    if "://" in raw:
+        return raw
+    # Bare path: assume SQLite. (Tests set DATABASE_URL to a raw tmp path.)
+    return f"sqlite:///{raw}"
 
 
 # ---------------------------------------------------------------------------
-# Engine
+# Engine kwargs per backend
 # ---------------------------------------------------------------------------
 def _build_engine_kwargs(url: str) -> dict:
     """Return engine kwargs appropriate for the URL backend."""
@@ -68,22 +98,51 @@ def _build_engine_kwargs(url: str) -> dict:
     return kwargs
 
 
-engine = create_engine(DATABASE_URL, **_build_engine_kwargs(DATABASE_URL))
+# ---------------------------------------------------------------------------
+# Engine + session factory (module-level, refreshable via reset_engine)
+# ---------------------------------------------------------------------------
+def _make_engine_and_factory(url: str):
+    """Build a fresh engine + session factory for ``url``."""
+    eng = create_engine(url, **_build_engine_kwargs(url))
+    factory = sessionmaker(
+        bind=eng,
+        autocommit=False,
+        autoflush=False,
+        expire_on_commit=False,
+        future=True,
+    )
+    return eng, factory
 
 
-# ---------------------------------------------------------------------------
-# Session factory
-# ---------------------------------------------------------------------------
-# autocommit=False  → explicit `commit()` is required, matches old code.
-# autoflush=False   → keep behaviour predictable; we flush manually if needed.
-# expire_on_commit=False  → after commit, attributes are still readable.
-SessionLocal = sessionmaker(
-    bind=engine,
-    autocommit=False,
-    autoflush=False,
-    expire_on_commit=False,
-    future=True,
-)
+DATABASE_URL = _resolve_database_url()
+engine, SessionLocal = _make_engine_and_factory(DATABASE_URL)
+
+
+def reset_engine() -> str:
+    """Re-resolve ``DATABASE_URL`` and rebuild the engine + session factory.
+
+    Disposes the old engine first so its pooled connections (if any) are
+    closed cleanly. Returns the new URL for the convenience of tests that
+    want to assert on it.
+
+    Use this in test fixtures **after** monkeypatching the env var:
+
+        monkeypatch.setenv("DATABASE_URL", str(tmp_db_file))
+        from app.db.base import reset_engine
+        reset_engine()
+
+    Production code never calls this — the singletons are immutable for
+    the lifetime of the gunicorn worker.
+    """
+    global DATABASE_URL, engine, SessionLocal
+    try:
+        engine.dispose()
+    except Exception:
+        # `dispose` is best-effort; never let a teardown error propagate.
+        pass
+    DATABASE_URL = _resolve_database_url()
+    engine, SessionLocal = _make_engine_and_factory(DATABASE_URL)
+    return DATABASE_URL
 
 
 # ---------------------------------------------------------------------------

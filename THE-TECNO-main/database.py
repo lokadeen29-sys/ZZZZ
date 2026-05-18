@@ -132,45 +132,91 @@ def ensure_indexes():
 # ============================================================
 # V42 batch2: Wishlist helpers
 # ============================================================
+# V72 / session 3 / PR #1: rewritten to use SQLAlchemy ORM.
+# Public signatures, return types, and dict shapes are unchanged so the
+# (currently dormant) wishlist callers do not need any updates.
 def wishlist_list(user_id):
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT w.provider, w.game_key, w.created_at,
-                   g.name AS name, g.image_url AS image_url
-            FROM wishlist w
-            LEFT JOIN games g ON g.provider=w.provider AND g.game_key=w.game_key
-            WHERE w.user_id=?
-            ORDER BY w.created_at DESC
-        """, (user_id,)).fetchall()]
+    """Return the user's wishlist joined with `games` for display.
+
+    Each item is a dict with: provider, game_key, created_at, name, image_url.
+    `name` / `image_url` may be None when the linked game was deleted.
+    Order: most recently added first.
+    """
+    from app.db.session import get_session
+    from app.db.models import Wishlist, Game
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                Wishlist.provider,
+                Wishlist.game_key,
+                Wishlist.created_at,
+                Game.name.label("name"),
+                Game.image_url.label("image_url"),
+            )
+            .outerjoin(
+                Game,
+                (Game.provider == Wishlist.provider)
+                & (Game.game_key == Wishlist.game_key),
+            )
+            .filter(Wishlist.user_id == user_id)
+            .order_by(Wishlist.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "provider": r.provider,
+                "game_key": r.game_key,
+                "created_at": r.created_at,
+                "name": r.name,
+                "image_url": r.image_url,
+            }
+            for r in rows
+        ]
 
 
 def wishlist_has(user_id, provider, game_key):
-    with db_conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM wishlist WHERE user_id=? AND provider=? AND game_key=?",
-            (user_id, provider, game_key)
-        ).fetchone()
-        return bool(row)
+    from app.db.session import get_session
+    from app.db.models import Wishlist
+
+    with get_session() as s:
+        exists = (
+            s.query(Wishlist.id)
+            .filter_by(user_id=user_id, provider=provider, game_key=game_key)
+            .first()
+        )
+        return exists is not None
 
 
 def wishlist_toggle(user_id, provider, game_key):
     """returns True if added, False if removed."""
-    with db_conn() as conn:
-        cur = conn.execute(
-            "SELECT id FROM wishlist WHERE user_id=? AND provider=? AND game_key=?",
-            (user_id, provider, game_key)
-        ).fetchone()
-        if cur:
-            conn.execute("DELETE FROM wishlist WHERE id=?", (cur["id"],))
-            added = False
-        else:
-            conn.execute(
-                "INSERT INTO wishlist(user_id, provider, game_key) VALUES (?,?,?)",
-                (user_id, provider, game_key)
+    from app.db.session import get_session
+    from app.db.models import Wishlist
+
+    with get_session() as s:
+        existing = (
+            s.query(Wishlist)
+            .filter_by(user_id=user_id, provider=provider, game_key=game_key)
+            .first()
+        )
+        if existing is not None:
+            s.delete(existing)
+            s.commit()
+            return False
+        # `created_at` was originally written as TIMESTAMP DEFAULT
+        # CURRENT_TIMESTAMP. We now store unix-epoch ints to match the rest
+        # of the schema and the ORM model. Wishlist UI was removed in V43,
+        # so no consumer parses this value.
+        s.add(
+            Wishlist(
+                user_id=user_id,
+                provider=provider,
+                game_key=game_key,
+                created_at=int(time.time()),
             )
-            added = True
-        conn.commit()
-        return added
+        )
+        s.commit()
+        return True
 
 
 def _escape_like(q):
@@ -514,15 +560,35 @@ def seed_admin(email, password):
 
 
 def set_setting(key, value):
-    with db_conn() as conn:
-        conn.execute("INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)", (key, str(value)))
-        conn.commit()
+    """Upsert a key/value pair into the `settings` table.
+
+    V72 / session 3 / PR #1: rewritten with SQLAlchemy ORM. Keeps the
+    same INSERT-OR-REPLACE semantics across both SQLite and Postgres by
+    doing an explicit "lookup → update or insert". This is one extra
+    round-trip compared to the SQLite-only `INSERT OR REPLACE` but it's
+    backend-portable and the call site is admin-only / low-frequency.
+    """
+    from app.db.session import get_session
+    from app.db.models import Setting
+
+    str_value = str(value)
+    with get_session() as s:
+        row = s.get(Setting, key)
+        if row is None:
+            s.add(Setting(key=key, value=str_value))
+        else:
+            row.value = str_value
+        s.commit()
 
 
 def get_setting(key, default=None):
-    with db_conn() as conn:
-        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        return row["value"] if row else default
+    """Return the string value for `key`, or `default` if the row is missing."""
+    from app.db.session import get_session
+    from app.db.models import Setting
+
+    with get_session() as s:
+        row = s.get(Setting, key)
+        return row.value if row is not None else default
 
 
 def create_user(name, email, phone, password, email_verified=0, email_token=None):
@@ -1355,37 +1421,63 @@ def list_user_deposits_admin(user_id):
 # --- Payment Methods & Deposits ---
 
 def list_payment_methods(only_active=False):
-    with db_conn() as conn:
-        q = "SELECT * FROM payment_methods"
+    """Return all payment methods as a list of dicts, ordered by name.
+
+    V72 / session 3 / PR #1: rewritten with SQLAlchemy ORM. The dict
+    shape is preserved (keys: id, name, emoji, address, instructions,
+    active, currency) so admin templates and the JSON API at
+    `/api/payment-methods` continue to work unchanged.
+    """
+    from app.db.models import PaymentMethod
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        q = s.query(PaymentMethod)
         if only_active:
-            q += " WHERE active=1"
-        q += " ORDER BY name"
-        return [dict(r) for r in conn.execute(q).fetchall()]
+            q = q.filter(PaymentMethod.active == 1)
+        return rows_to_dicts(q.order_by(PaymentMethod.name).all())
 
 
 def get_payment_method(method_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM payment_methods WHERE id=?", (method_id,)).fetchone()
-        return dict(row) if row else None
+    """Look up a payment method by its (string) primary key."""
+    from app.db.models import PaymentMethod
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = s.get(PaymentMethod, method_id)
+        return row_to_dict(row) if row is not None else None
 
 
 def update_payment_method(method_id, name=None, emoji=None, address=None, instructions=None, active=None, currency=None):
-    method = get_payment_method(method_id)
-    if not method:
-        return False
-    name = method["name"] if name is None else name
-    emoji = method["emoji"] if emoji is None else emoji
-    address = method["address"] if address is None else address
-    instructions = method["instructions"] if instructions is None else instructions
-    active = method["active"] if active is None else (1 if active else 0)
-    currency = method.get("currency", "USD") if currency is None else currency
-    with db_conn() as conn:
-        conn.execute("""
-            UPDATE payment_methods SET name=?, emoji=?, address=?, instructions=?, active=?, currency=?
-            WHERE id=?
-        """, (name, emoji, address, instructions, active, currency, method_id))
-        conn.commit()
-    return True
+    """Update only the fields the caller provided; missing kwargs keep
+    their current values (None means "do not touch").
+
+    Returns True when the row was updated, False if the row does not
+    exist. V72 / session 3 / PR #1: rewritten with SQLAlchemy ORM.
+    """
+    from app.db.models import PaymentMethod
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = s.get(PaymentMethod, method_id)
+        if row is None:
+            return False
+        if name is not None:
+            row.name = name
+        if emoji is not None:
+            row.emoji = emoji
+        if address is not None:
+            row.address = address
+        if instructions is not None:
+            row.instructions = instructions
+        if active is not None:
+            row.active = 1 if active else 0
+        if currency is not None:
+            row.currency = currency
+        s.commit()
+        return True
 
 
 def can_download_proof(user_id: int, is_admin: bool, filename: str) -> bool:

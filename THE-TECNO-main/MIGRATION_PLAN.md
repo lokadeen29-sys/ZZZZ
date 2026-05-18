@@ -13,7 +13,7 @@
 | 0 | التحضير + إنشاء الخطة | ✅ مكتملة | 2026-05-18 |
 | 1 | إضافة SQLAlchemy + Models | ✅ مكتملة | 2026-05-18 |
 | 2 | تهيئة Alembic + baseline | ✅ مكتملة | 2026-05-18 |
-| 3 | إعادة كتابة database.py بـ ORM | ⏸️ لم تبدأ | - |
+| 3 | إعادة كتابة database.py بـ ORM | ⏳ قيد التنفيذ (PR #1) | - |
 | 4 | كتابة سكربت نقل البيانات | ⏸️ لم تبدأ | - |
 | 5 | تثبيت Postgres على Hetzner | ⏸️ لم تبدأ | - |
 | 6 | تنفيذ النقل + الاختبار | ⏸️ لم تبدأ | - |
@@ -360,7 +360,7 @@ cd /root/project
 
 ## 🔄 الجلسة 3: تحويل database.py لاستخدام ORM
 
-**الحالة:** لم تبدأ
+**الحالة:** قيد التنفيذ (PR #1 جاهز)
 
 **الهدف:** كل دوال `database.py` (~80 دالة) تستخدم SQLAlchemy داخلياً، لكن نفس الـ signatures (لا يكسر شيء).
 
@@ -386,12 +386,96 @@ def get_user(user_id):
 ```
 
 ### المجموعات (موجة بموجة في PRs منفصلة):
-- **PR #1:** الدوال البسيطة (`get_setting`, `set_setting`, `wishlist_*`, `list_payment_methods`)
+- **PR #1:** ✅ جاهز للمراجعة — الدوال البسيطة (`get_setting`, `set_setting`, `wishlist_*`, `list_payment_methods`, `get_payment_method`, `update_payment_method`)
 - **PR #2:** دوال القراءة (`list_games`, `list_products`, `get_game`, `get_product`, `get_user`)
 - **PR #3:** دوال الطلبات (`list_orders`, `list_user_orders`, `get_order`, `update_order`)
 - **PR #4:** دوال الإيداع (`create_deposit`, `list_deposits_*`)
 - **PR #5:** الدوال الحرجة (`create_order`, `change_balance`, `set_user_balance`)
 - **PR #6:** الباقي (audit_log, admin functions)
+
+### ✅ ما تم إنجازه في PR #1 (الموجة الأولى):
+
+#### 1. بنية تحتية للـ ORM داخل `database.py`
+- إضافة `app/db/orm_helpers.py` — دالة `row_to_dict` تحوّل أي ORM instance إلى نفس شكل `sqlite3.Row → dict` المعتاد، مع معالجة صحيحة للأعمدة ذات alias (مثل `audit_log.metadata` ↔ `AuditLog.meta`).
+- تحسين `app/db/base.py`:
+  - يقبل الآن مسارات الملفات العارية (يلفّها كـ `sqlite:///` تلقائياً) — يفيد test fixtures.
+  - دالة `reset_engine()` جديدة لتجديد المحرك + جلسة المصنع بعد monkeypatch لـ `DATABASE_URL`.
+- تحسين `app/db/session.py`: يبحث عن `SessionLocal` ديناميكياً عبر `app.db.base` — لذا `reset_engine()` يقلب الربط لكل النداءات اللاحقة.
+
+#### 2. تحويل 7 دوال (الموجة الأولى)
+في `database.py`، تم استبدال raw SQL بـ ORM داخل:
+- `set_setting(key, value)` — upsert عبر `s.get(Setting, key)` ثم update أو insert.
+- `get_setting(key, default=None)` — lookup بسيط بالمفتاح الأساسي.
+- `wishlist_list(user_id)` — `outerjoin` بـ `Game` لإرجاع قائمة dicts بنفس الأعمدة الـ legacy.
+- `wishlist_has(user_id, provider, game_key)` — `bool` query.
+- `wishlist_toggle(user_id, provider, game_key)` — حذف أو إدراج (ملاحظة: `created_at` يُكتب الآن كـ `int(time.time())` بدل `CURRENT_TIMESTAMP` — لا أحد يقرأه منذ V43).
+- `list_payment_methods(only_active=False)` — query مع filter اختياري + ترتيب بالاسم.
+- `get_payment_method(method_id)` — `s.get(PaymentMethod, method_id)`.
+- `update_payment_method(method_id, **kwargs)` — مع دمج صحيح للقيم الافتراضية (`None` يعني "لا تغيّر").
+
+#### 3. تحديث `tests/conftest.py`
+- استدعاء `app.db.base.reset_engine()` بعد monkeypatch لـ `DATABASE_URL` — يضمن أن ORM يرى DB المؤقّتة لكل اختبار.
+
+#### 4. اختبارات جديدة `tests/test_database_orm_pr1.py`
+- ~16 اختبار pytest يفحصون:
+  - صحّة dict shape (أسماء الأعمدة بالضبط).
+  - دمج جزئي في `update_payment_method` (الحقول غير الممرّرة لا تُلمَس).
+  - دلالات الإرجاع (`True`/`False` لـ `wishlist_toggle`، `None` لـ row غير موجود).
+  - ترتيب `wishlist_list` (الأحدث أولاً).
+  - السلوك الافتراضي عند غياب القيمة في `get_setting`.
+  - فلتر `only_active` لـ `list_payment_methods`.
+
+### 📍 المخرجات (الملفات الجديدة + المعدّلة في PR #1):
+
+| الملف | تغيير | الوصف |
+|------|-------|-------|
+| `app/db/orm_helpers.py` | جديد (~70 سطر) | `row_to_dict` / `rows_to_dicts` |
+| `app/db/base.py` | معدّل (+50 سطر) | `reset_engine` + URL coercion |
+| `app/db/session.py` | معدّل (+5 سطر) | dynamic `SessionLocal` lookup |
+| `app/db/__init__.py` | معدّل (+5 سطر) | يصدّر `reset_engine` |
+| `database.py` | معدّل (8 دوال) | استبدال raw SQL بـ ORM داخلياً |
+| `tests/conftest.py` | معدّل (+8 سطر) | `reset_engine` بعد monkeypatch |
+| `tests/test_database_orm_pr1.py` | جديد (~200 سطر) | 16 اختبار parity |
+
+### 🛡️ ضمانات السلامة (PR #1):
+- ✅ كل التواقيع وقيم الإرجاع كما هي (callers لا تتغيّر).
+- ✅ شكل dict مطابق لـ `sqlite3.Row → dict` (نفس أسماء الأعمدة).
+- ✅ `with db_conn()` ما زال مستخدم 82 مرة — اختبار `test_db_conn_usage_count` ما زال أخضر (≥70).
+- ✅ كل اختبارات الـ XSS التي تستدعي `list_payment_methods` / `get_payment_method` / `get_setting` ستعمل دون تعديل.
+- ✅ النماذج تتطابق مع الـ schema الحقيقية (تم التحقّق في الجلسات 1+2).
+
+### 🚀 ما يفعله المستخدم بعد PR #1:
+
+#### الخطوة 1: راجع الـ PR على GitHub (`feat/postgres-migration-session3-pr1`)
+انظر diff في `database.py`؛ كل دالة معدّلة لها تعليق `# V72 / session 3 / PR #1` أعلى التعريف.
+
+#### الخطوة 2: deploy كالعادة (نفس الإجراء)
+```bash
+scp ZZZZ-main.zip root@46.224.87.50:/root/
+ssh root@46.224.87.50
+/root/deploy.sh /root/tecnogems_latest.zip
+```
+
+#### الخطوة 3: تأكّد أن الموقع يعمل بشكل طبيعي
+- صفحة `wallet` تعرض طرق الدفع.
+- لوحة الأدمن `/admin/payment-methods` تعرض القائمة.
+- صفحة الإعدادات تعرض القيم الحالية.
+- التعديل في `/admin/payment-method/<id>` يحفظ الحقول الجزئية.
+
+#### الخطوة 4: شغّل الاختبارات (اختياري)
+```bash
+cd /root/project
+.venv/bin/pytest tests/test_database_orm_pr1.py -v
+```
+
+### ✅ معايير النجاح لـ PR #1:
+- [ ] الـ CI يمرّ على branch
+- [ ] الموقع يعمل بشكل طبيعي بعد deploy
+- [ ] لا تغيير ملحوظ في تجربة الأدمن / المستخدم
+
+### 🔄 Rollback إذا فشل أي شيء:
+- أعد deploy للنسخة السابقة من `deploy.sh` (يحفظ نسخة احتياطية تلقائياً).
+- لم يحدث أي تغيير في DB schema، فلا حاجة لـ DB rollback.
 
 ### تأكد بعد كل PR:
 - [ ] الموقع يعمل تماماً كما كان (لا تغيير في السلوك)
@@ -658,7 +742,7 @@ Kiro سيقرأ ملف `MIGRATION_PLAN.md`، يفحص حالة كل جلسة، �
 ---
 
 **تاريخ إنشاء الخطة:** 2026-05-18  
-**آخر تحديث:** 2026-05-18 (الجلسة 2 — تهيئة Alembic + baseline)  
+**آخر تحديث:** 2026-05-18 (الجلسة 3 / PR #1 — تحويل 8 دوال بسيطة إلى ORM)  
 **المسؤول:** Kiro + المستخدم  
 
 > 💬 لأي استفسار: ابدأ محادثة جديدة وقل _"عندي سؤال عن MIGRATION_PLAN.md"_
