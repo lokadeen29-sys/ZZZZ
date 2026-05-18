@@ -306,7 +306,7 @@ ip = request.headers.get("CF-Connecting-IP") or request.remote_addr
 
 4. **CDN caching:**
    ```bash
-   curl -I https://tecnogems.com/static/css/tecnogems.min.css
+   curl -I https://tecnogems.com/static/css/v60-neon.css
    # توقَّع: cf-cache-status: HIT (بعد الطلب الثاني)
    ```
 

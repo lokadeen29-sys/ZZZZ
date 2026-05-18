@@ -35,7 +35,6 @@ FILES=(
     "templates/admin/users.html"
     "templates/admin/games.html"
     "templates/wallet_transactions.html"
-    "static/css/tecnogems.min.css"
 )
 
 echo "=== V49 Currency + UI Hotfix installer ($TS) ==="
