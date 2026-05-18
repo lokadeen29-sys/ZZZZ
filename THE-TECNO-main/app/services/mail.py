@@ -1,30 +1,39 @@
 """V53 REFACTOR (phase 1): SMTP sender + transactional email helpers.
 
-Originally lived at app.py:733-1041. Behaviour preserved exactly:
+V69 (this revision): registration + password-reset emails are now sent
+**asynchronously** via RQ with retry, instead of blocking the HTTP
+request on a 5-30s SMTP round-trip (the V62.1 sync regression).
+
+Behaviour summary:
 
 - Multipart (plain + HTML) MIME with V67 deliverability headers.
 - Aligned envelope sender (matches SMTP-AUTH user) for SPF alignment.
-- Async send via RQ (when REDIS_URL is set in tasks.USE_RQ) with a
-  thread-pool fallback (2 worker threads spawned at import time).
-- ``send_verification_email``, ``send_password_reset_email``, and
-  ``send_email_change_confirmation`` send **synchronously** so SMTP
-  errors surface to the caller (V62.1 fix). The async path is reserved
-  for fire-and-forget admin notifications.
+- ``send_verification_email`` and ``send_password_reset_email`` now
+  enqueue to RQ with a 3-attempt retry policy (30s / 2min / 10min). If
+  REDIS_URL is missing or the enqueue itself fails, we fall back to a
+  synchronous send so the caller still sees real SMTP errors and the
+  email is never silently dropped to an in-process queue that disappears
+  on restart. Background failures are surfaced via RQ's
+  FailedJobRegistry + Sentry.
+- ``send_email_change_confirmation`` stays **synchronous** on purpose:
+  the user is sitting on the profile page waiting for confirmation, so
+  the few-hundred-ms SMTP latency is acceptable in exchange for an
+  immediate, accurate error message if delivery fails.
 
-Email HTML bodies are now rendered from Jinja templates in
-``templates/email/*.html`` (PR refactor/phase-1). The legacy
-``_build_email_html`` helper is kept for backwards compatibility — it
-now defers to the same Jinja base template.
+Email HTML bodies are rendered from Jinja templates in
+``templates/email/*.html``. The legacy ``_build_email_html`` helper is
+kept for backwards compatibility.
 
-Public symbols (consumed by app.py and routes/auth_bp.py):
+Public symbols (consumed by app.py and routes):
 
 - ``email_verification_is_enabled()``
 - ``email_is_configured()``
 - ``send_email(to_email, subject, body, html_body=None)`` (async-ish)
-- ``send_verification_email(to_email, token)``     (synchronous)
-- ``send_password_reset_email(to_email, token)``   (synchronous)
-- ``send_email_change_confirmation(to_email, token)`` (synchronous)
-- ``email_queue`` (in-process Queue used by the worker threads)
+- ``send_verification_email(to_email, token)``       (async via RQ + retry)
+- ``send_password_reset_email(to_email, token)``     (async via RQ + retry)
+- ``send_email_change_confirmation(to_email, token)``(synchronous, intentional)
+- ``email_queue`` (in-process Queue used by the worker threads,
+  retained for the generic ``send_email`` fallback path)
 
 Plus the lower-level building blocks (also re-exported via app.py):
 - ``_send_email_sync``, ``_email_worker``, ``_aligned_envelope_sender``
@@ -216,6 +225,68 @@ def send_email(to_email, subject, body, html_body=None):
 
 
 # ---------------------------------------------------------------------------
+# Async transactional dispatch (RQ with retry, sync fallback)
+# ---------------------------------------------------------------------------
+# V69: registration / password-reset must not block the HTTP request on
+# SMTP. We enqueue to RQ with a retry policy and let the worker handle
+# delivery. The fallback path is *synchronous* on purpose — see the
+# module docstring for why we don't fall back to the in-process queue.
+def _enqueue_transactional(to_email, subject, body, html_body):
+    """Enqueue a transactional email to RQ with retry; sync fallback.
+
+    Returns True if successfully enqueued for asynchronous delivery,
+    False if we had to fall back to (and complete) a synchronous send.
+
+    Any exception raised here is a real failure the caller should surface
+    to the user — it means both the async path AND the sync fallback
+    failed.
+    """
+    if not email_is_configured():
+        raise RuntimeError("SMTP email settings are missing. Check .env")
+
+    try:
+        from tasks import USE_RQ, _queue, send_email_task
+        if USE_RQ and _queue is not None:
+            from rq import Retry
+            _queue.enqueue(
+                send_email_task,
+                args=(
+                    to_email, subject, body,
+                    MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD,
+                    MAIL_USE_TLS, MAIL_FROM,
+                ),
+                kwargs={
+                    "html_body": html_body,
+                    "mail_from_name": MAIL_FROM_NAME,
+                    "reply_to": MAIL_REPLY_TO or MAIL_FROM,
+                },
+                # 3 retries spaced 30s / 2min / 10min — enough to ride
+                # through transient Gmail blips without spamming.
+                retry=Retry(max=3, interval=[30, 120, 600]),
+                job_timeout=60,
+                # Keep failures around for a week so admins (and Sentry
+                # alerts pointing here) can inspect the traceback.
+                failure_ttl=86400 * 7,
+                result_ttl=3600,
+            )
+            log.info("Email enqueued to RQ to=%s subject=%s", to_email, subject)
+            return True
+    except Exception as exc:
+        # Don't raise here — fall through to the sync send so the email
+        # still has a chance, AND so the caller still sees real SMTP
+        # errors if SMTP itself is the problem.
+        log.warning(
+            "RQ enqueue failed for transactional email (to=%s, subject=%s); "
+            "falling back to synchronous send: %s",
+            to_email, subject, exc,
+        )
+
+    # Sync fallback — no Redis, or RQ enqueue raised.
+    _send_email_sync(to_email, subject, body, html_body=html_body)
+    return False
+
+
+# ---------------------------------------------------------------------------
 # HTML rendering (Jinja templates)
 # ---------------------------------------------------------------------------
 def _build_email_html(title, greeting, message, button_text, button_url, footer_note):
@@ -264,10 +335,13 @@ def send_verification_email(to_email, token):
         link=link,
         base_url=BASE_URL,
     )
-    # V62.1 FIX: send synchronously so SMTP errors surface to the caller.
-    if not email_is_configured():
-        raise RuntimeError("SMTP email settings are missing. Check .env")
-    _send_email_sync(to_email, "TecnoGems - تفعيل حسابك", body, html_body=html_body)
+    # V69: async via RQ with retry. Don't block the HTTP response on a
+    # 5-30s SMTP round-trip; if the SMTP server is slow or transiently
+    # down, RQ will retry in the background. Falls back to synchronous
+    # send only when RQ itself is unavailable.
+    _enqueue_transactional(
+        to_email, "TecnoGems - تفعيل حسابك", body, html_body
+    )
 
 
 def send_password_reset_email(to_email, token):
@@ -294,10 +368,10 @@ def send_password_reset_email(to_email, token):
         link=link,
         base_url=BASE_URL,
     )
-    # V62.1 FIX: synchronous send.
-    if not email_is_configured():
-        raise RuntimeError("SMTP email settings are missing. Check .env")
-    _send_email_sync(to_email, "TecnoGems - استعادة كلمة المرور", body, html_body=html_body)
+    # V69: async via RQ with retry (same rationale as verification).
+    _enqueue_transactional(
+        to_email, "TecnoGems - استعادة كلمة المرور", body, html_body
+    )
 
 
 def send_email_change_confirmation(to_email, token):
@@ -322,7 +396,12 @@ def send_email_change_confirmation(to_email, token):
         link=link,
         base_url=BASE_URL,
     )
-    # V62.1 FIX (extended): synchronous send so SMTP errors surface in profile().
+    # V69: intentionally synchronous. Unlike registration / forgot-password
+    # (which fire a long-running form submit and benefit from a snappy
+    # response), the email-change flow happens inside the profile page
+    # while the user is actively watching for confirmation; the few
+    # hundred ms SMTP latency is worth getting an immediate, accurate
+    # error message if delivery fails.
     if not email_is_configured():
         raise RuntimeError("SMTP email settings are missing. Check .env")
     _send_email_sync(to_email, "TecnoGems - تأكيد تغيير البريد", body, html_body=html_body)
@@ -345,6 +424,7 @@ __all__ = [
     "_send_email_sync",
     "_email_worker",
     "send_email",
+    "_enqueue_transactional",
     "_build_email_html",
     "send_verification_email",
     "send_password_reset_email",
