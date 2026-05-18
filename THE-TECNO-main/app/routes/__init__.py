@@ -86,3 +86,10 @@ def register_blueprints(app: Flask, deps=None) -> None:
 
     app.register_blueprint(api_bp)
     init_csrf_exemption()
+
+    # ---------------------------------------------------------------
+    # Health check (monitoring / uptime probes)
+    # ---------------------------------------------------------------
+    from .health_bp import bp as health_bp
+
+    app.register_blueprint(health_bp)
