@@ -167,30 +167,11 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton — what wsgi.py imports
-# ---------------------------------------------------------------------------
-app = create_app()
-
-
-# ---------------------------------------------------------------------------
-# wsgi.py compatibility re-exports
-# ---------------------------------------------------------------------------
-# wsgi.py does:
-#     from app import app, init_db, ensure_indexes, seed_admin,
-#                     seed_local_provider_catalog, attach_generated_posters
-# Re-export them here so the deployment glue keeps working without changes.
-from database import (  # noqa: E402,F401  (re-exported for wsgi.py)
-    init_db,
-    ensure_indexes,
-    seed_admin,
-    seed_local_provider_catalog,
-    attach_generated_posters,
-)
-
-
-# ---------------------------------------------------------------------------
 # Helpers — kept private to this module
 # ---------------------------------------------------------------------------
+# NOTE: These MUST be defined before `app = create_app()` below because
+# create_app() calls them during module load. Moving them after the
+# singleton causes NameError at import time on a fresh Python process.
 def _apply_secret_key(app: Flask) -> None:
     """Resolve and set ``app.secret_key``.
 
@@ -365,6 +346,28 @@ def _register_jinja(app: Flask) -> None:
             "smart_game_image": smart_game_image_url,
             "game_image": game_image_url,
         }
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton — what wsgi.py imports
+# ---------------------------------------------------------------------------
+app = create_app()
+
+
+# ---------------------------------------------------------------------------
+# wsgi.py compatibility re-exports
+# ---------------------------------------------------------------------------
+# wsgi.py does:
+#     from app import app, init_db, ensure_indexes, seed_admin,
+#                     seed_local_provider_catalog, attach_generated_posters
+# Re-export them here so the deployment glue keeps working without changes.
+from database import (  # noqa: E402,F401  (re-exported for wsgi.py)
+    init_db,
+    ensure_indexes,
+    seed_admin,
+    seed_local_provider_catalog,
+    attach_generated_posters,
+)
 
 
 # ---------------------------------------------------------------------------
