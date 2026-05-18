@@ -738,9 +738,32 @@ def reset_user_password(token, new_password):
 
 
 def get_user(user_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        return dict(row) if row else None
+    """Look up a single user by primary key.
+
+    V72 / session 3 / PR #2: rewritten with SQLAlchemy ORM. The legacy
+    return contract is preserved exactly:
+
+      * Returns ``None`` when no row matches (callers do `if user is None`).
+      * Otherwise returns a plain ``dict`` with every column from the
+        ``users`` table — same keys as the old ``dict(sqlite3.Row)``.
+        Templates and routes index into this dict by column name
+        (``user["balance"]``, ``user["role"]`` …) so the shape MUST stay.
+
+    Note: ``user_id`` is coerced to ``int`` to match the legacy
+    SQLite-style implicit cast — callers occasionally pass a string
+    (e.g. from ``request.args``) and we must not raise a TypeError.
+    """
+    from app.db.models import User
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        return None
+    with get_session() as s:
+        row = s.get(User, uid)
+        return row_to_dict(row) if row is not None else None
 
 
 def update_user_profile(user_id, name=None, phone=None):
@@ -893,15 +916,34 @@ def delete_products_for_game(provider, game_key):
 
 
 def list_games(provider=None, only_active=True):
-    with db_conn() as conn:
-        q = "SELECT * FROM games WHERE 1=1"
-        args = []
+    """Return all games as a list of dicts.
+
+    V72 / session 3 / PR #2: rewritten with SQLAlchemy ORM. Behaviour
+    is preserved bit-for-bit:
+
+      * Optional ``provider`` filter (e.g. ``"server2"``).
+      * ``only_active=True`` (default) hides inactive games.
+      * Ordering: ``active DESC, name ASC, id ASC`` — important so the
+        admin-only "all games" view groups inactive entries at the
+        bottom in a stable order.
+      * Each row is a plain ``dict`` with the full set of columns from
+        the ``games`` table (id, provider, game_key, name, emoji,
+        image_url, active, pricing_currency, show_on_home,
+        home_sort_order). Templates iterate `g["name"]`, `g["image_url"]`
+        and `g["emoji"]` so the dict shape MUST not drift.
+    """
+    from app.db.models import Game
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        q = s.query(Game)
         if provider:
-            q += " AND provider=?"; args.append(provider)
+            q = q.filter(Game.provider == provider)
         if only_active:
-            q += " AND active=1"
-        q += " ORDER BY active DESC, name ASC, id ASC"
-        return [dict(r) for r in conn.execute(q, args).fetchall()]
+            q = q.filter(Game.active == 1)
+        q = q.order_by(Game.active.desc(), Game.name.asc(), Game.id.asc())
+        return rows_to_dicts(q.all())
 
 
 def translate_product_name(name):
@@ -1028,36 +1070,102 @@ def update_game_pricing(provider, game_key, pricing_currency):
 
 
 def list_products(provider, game_key, only_active=True, group_id=None):
-    with db_conn() as conn:
+    """List products for a (provider, game_key) tuple.
+
+    V72 / session 3 / PR #2: rewritten with SQLAlchemy ORM. The query
+    has several quirks that the legacy SQLite version baked in over
+    several releases — every one of them is preserved here:
+
+      1. **Curated subset**: when ``only_active=True`` and at least one
+         active product has a *positive* ``sort_order`` (i.e. the admin
+         curated this game), we return ONLY the curated rows. Products
+         with ``sort_order=0`` are noise from bulk imports. If no row is
+         curated, we fall through to the full active list.
+      2. **Optional group filter**: ``group_id`` filters by
+         ``products.group_id``. ``None`` means "no filter" (show all
+         groups).
+      3. **Ordering**: rows with ``sort_order=0`` are pushed to the end
+         (treated as 999999), ties broken by ``sell_price ASC`` then
+         ``id ASC`` for stability.
+      4. **Last-resort fallback**: when ``only_active=True`` produced
+         zero rows AND the caller did not request a specific group, we
+         re-run the query with ``only_active=False`` and no curated-
+         subset filter so the page never renders empty for an admin
+         who just imported products.
+      5. **``display_name`` injection**: every returned dict has a
+         freshly-computed ``display_name`` field (Arabic-translated
+         ``name``). This is added in Python because ``translate_product_name``
+         is not a SQL function. Templates read this key directly.
+
+    The dict shape matches the ``products`` table columns one-for-one
+    plus the synthetic ``display_name``. Callers MUST keep working
+    without changes.
+    """
+    from sqlalchemy import asc, case, func
+
+    from app.db.models import Product
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    # Replicates `CASE WHEN COALESCE(sort_order,0)=0 THEN 999999 ELSE sort_order END`.
+    # `func.coalesce` works identically on SQLite and Postgres.
+    sort_key = case(
+        (func.coalesce(Product.sort_order, 0) == 0, 999999),
+        else_=Product.sort_order,
+    )
+
+    with get_session() as s:
         positive_count = 0
         if only_active:
-            positive_count = conn.execute(
-                "SELECT COUNT(*) FROM products WHERE provider=? AND game_key=? AND active=1 AND COALESCE(sort_order,0)>0",
-                (provider, game_key)
-            ).fetchone()[0]
+            positive_count = (
+                s.query(func.count(Product.id))
+                .filter(
+                    Product.provider == provider,
+                    Product.game_key == game_key,
+                    Product.active == 1,
+                    func.coalesce(Product.sort_order, 0) > 0,
+                )
+                .scalar()
+            ) or 0
 
-        q = "SELECT * FROM products WHERE provider=? AND game_key=?"
-        args = [provider, game_key]
+        q = s.query(Product).filter(
+            Product.provider == provider,
+            Product.game_key == game_key,
+        )
         if only_active:
-            q += " AND active=1"
+            q = q.filter(Product.active == 1)
             if positive_count > 0:
-                q += " AND COALESCE(sort_order,0)>0"
+                q = q.filter(func.coalesce(Product.sort_order, 0) > 0)
         if group_id is not None:
-            q += " AND group_id=?"
-            args.append(int(group_id))
-        q += " ORDER BY CASE WHEN COALESCE(sort_order,0)=0 THEN 999999 ELSE sort_order END ASC, sell_price ASC, id ASC"
-        rows = [dict(r) for r in conn.execute(q, args).fetchall()]
+            q = q.filter(Product.group_id == int(group_id))
 
+        q = q.order_by(asc(sort_key), Product.sell_price.asc(), Product.id.asc())
+        rows = rows_to_dicts(q.all())
+
+        # Fallback: same shape as the legacy fallback — drop only_active
+        # AND drop the curated-subset filter, but keep the (provider,
+        # game_key) constraints. Only triggered when the caller did NOT
+        # ask for a specific group; otherwise an empty group result is
+        # expected and meaningful.
         if only_active and not rows and group_id is None:
-            rows = [dict(r) for r in conn.execute(
-                "SELECT * FROM products WHERE provider=? AND game_key=? ORDER BY CASE WHEN COALESCE(sort_order,0)=0 THEN 999999 ELSE sort_order END ASC, sell_price ASC, id ASC",
-                (provider, game_key)
-            ).fetchall()]
+            fb = (
+                s.query(Product)
+                .filter(
+                    Product.provider == provider,
+                    Product.game_key == game_key,
+                )
+                .order_by(
+                    asc(sort_key),
+                    Product.sell_price.asc(),
+                    Product.id.asc(),
+                )
+            )
+            rows = rows_to_dicts(fb.all())
 
-        for row in rows:
-            row["display_name"] = translate_product_name(row.get("name"))
+    for row in rows:
+        row["display_name"] = translate_product_name(row.get("name"))
 
-        return rows
+    return rows
 
 
 def list_public_product_groups_for_home():
@@ -1178,9 +1286,28 @@ def accounting_summary():
 
 
 def get_product(product_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
-        return dict(row) if row else None
+    """Look up a single ACTIVE product by primary key.
+
+    V72 / session 3 / PR #2: rewritten with SQLAlchemy ORM. Important
+    nuance: this returns ``None`` for inactive products too, NOT just
+    for missing rows. Callers rely on this to enforce the "no checkout
+    of disabled products" invariant. (For the unrestricted lookup used
+    by the RQ worker, see :func:`get_product_by_id` which keeps using
+    raw SQL until PR #5.)
+    """
+    from app.db.models import Product
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    try:
+        pid = int(product_id)
+    except (TypeError, ValueError):
+        return None
+    with get_session() as s:
+        row = s.get(Product, pid)
+        if row is None or row.active != 1:
+            return None
+        return row_to_dict(row)
 
 
 def get_product_by_id(product_id):
@@ -1192,9 +1319,25 @@ def get_product_by_id(product_id):
 
 
 def get_game(provider, game_key):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM games WHERE provider=? AND game_key=?", (provider, game_key)).fetchone()
-        return dict(row) if row else None
+    """Look up a game by its natural key ``(provider, game_key)``.
+
+    V72 / session 3 / PR #2: rewritten with SQLAlchemy ORM. Returns
+    ``None`` if the game is missing OR if either argument is empty
+    (legacy behaviour: the SQLite version would happily run with an
+    empty string, but no real row matches an empty provider/key, so
+    the contract is unchanged).
+    """
+    from app.db.models import Game
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = (
+            s.query(Game)
+            .filter(Game.provider == provider, Game.game_key == game_key)
+            .first()
+        )
+        return row_to_dict(row) if row is not None else None
 
 
 def _rate():
