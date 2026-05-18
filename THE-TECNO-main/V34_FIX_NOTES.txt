@@ -1,0 +1,5 @@
+V34 final fixes:
+- Disabled old prefetch behavior that was accidentally visiting /lang/en and toggling language on refresh.
+- Arabic stays default; English only after explicit click on EN.
+- Contact icons now apply to minified CSS too, so WhatsApp/Telegram move to fixed bottom-left stack.
+- Public package names are forced through language-aware filter in products, checkout and orders.

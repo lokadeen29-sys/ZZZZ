@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <div class="page-head">
+    <div>
+      <h1>{{ "Profile" if is_en else "الملف الشخصي" }}</h1>
+      <p class="muted">{{ "Manage your account information." if is_en else "إدارة معلومات حسابك." }}</p>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <div class="card">
+      <h2>{{ "Account Details" if is_en else "معلومات الحساب" }}</h2>
+      <p><b>{{ t("email") }}:</b> {{ user.email }}</p>
+      <p><b>{{ t("balance") }}:</b> {{ wallet_money(user.balance) }}</p>
+      <p><b>{{ "Role" if is_en else "الدور" }}:</b> {{ user.role }}</p>
+      {% if user.pending_email %}
+        <p class="alert warning">{{ "Pending email change:" if is_en else "تغيير بريد بانتظار التأكيد:" }} {{ user.pending_email }}</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>{{ "Edit Information" if is_en else "تعديل المعلومات" }}</h2>
+      <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>{{ t("name") }}</label>
+        <input name="name" value="{{ user.name }}" required>
+
+        <label>{{ t("phone") }}</label>
+        <input name="phone" value="{{ user.phone or '' }}">
+
+        <label>{{ "New email" if is_en else "بريد إلكتروني جديد" }}</label>
+        <input name="new_email" type="email" placeholder="{{ 'Requires confirmation link' if is_en else 'يتطلب رابط تأكيد' }}">
+        <p class="muted">{{ "Email will not change until you confirm the link sent to the new email." if is_en else "لن يتغير البريد الإلكتروني إلا بعد تأكيد الرابط المرسل إلى البريد الجديد." }}</p>
+
+        <button class="btn primary" type="submit" style="margin-top:16px">{{ "Save Changes" if is_en else "حفظ التعديلات" }}</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

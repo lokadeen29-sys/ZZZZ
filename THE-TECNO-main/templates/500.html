@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="notfound-wrap">
+  <div class="notfound-code">500</div>
+  <h1 class="notfound-title">{{ "Server error" if is_en else "خطأ في الخادم" }}</h1>
+  <p class="muted">{{ "Something went wrong on our side. Please try again in a moment." if is_en else "حدث خطأ غير متوقع من جانبنا. يرجى المحاولة بعد لحظات." }}</p>
+  <div class="notfound-actions">
+    <a href="{{ url_for('home') }}" class="btn primary">{{ "🏠 Go Home" if is_en else "🏠 الصفحة الرئيسية" }}</a>
+    {% if current_user %}
+    <a href="{{ url_for('orders') }}" class="btn">{{ "📦 My Orders" if is_en else "📦 طلباتي" }}</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

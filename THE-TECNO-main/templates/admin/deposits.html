@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <h1>طلبات شحن الرصيد</h1>
+  <form method="get" class="card" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:16px">
+    <label style="flex:1;min-width:240px">بحث في طلبات الرصيد
+      <input name="q" value="{{ q or '' }}" placeholder="كود الطلب أو الاسم أو البريد أو الإثبات">
+    </label>
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    <button class="btn primary" type="submit">بحث</button>
+  </form>
+  <div class="links" style="margin-bottom:16px">
+    <a class="btn" href="{{ url_for('admin_deposits') }}">الكل</a>
+    <a class="btn" href="{{ url_for('admin_deposits', status='pending') }}">معلقة</a>
+    <a class="btn" href="{{ url_for('admin_deposits', status='approved') }}">مقبولة</a>
+    <a class="btn" href="{{ url_for('admin_deposits', status='rejected') }}">مرفوضة</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>الطلب</th><th>المستخدم</th><th>المبلغ المدفوع</th><th>المبلغ المضاف للمحفظة</th><th>الطريقة</th><th>الإثبات</th><th>الحالة</th><th>إجراء</th></tr></thead>
+      <tbody>
+      {% for d in deposits %}
+        <tr>
+          <td>{{ d.deposit_code }}</td>
+          <td>{{ d.user_name }}<br><span class="muted">{{ d.user_email }}</span></td>
+          <td>{{ "%.2f"|format(d.amount) }} {{ "ل.س" if d.currency=="SYP" else "$" }}</td>
+          {# V49-HOTFIX: always pass amount_usd (internal USD value) to
+             wallet_money. Previously for SYP deposits the raw SYP amount was
+             passed, and since wallet_money treats its input as USD and
+             multiplies by the rate for SYP display, a 5000 SYP deposit was
+             rendered as 5000 * rate = 75,000,000 ل.س. #}
+          <td>{{ wallet_money(d.amount_usd or 0) }}</td>
+          <td>{{ d.method }}</td>
+          <td style="max-width:280px;white-space:normal">
+            {% for line in (d.proof or '').split('\n') %}
+              {% if line.startswith('صورة: ') %}
+                {% set path = line.replace('صورة: ', '') %}
+                <a class="btn" target="_blank" href="{{ path }}">عرض الصورة</a>
+              {% else %}
+                <div>{{ line }}</div>
+              {% endif %}
+            {% endfor %}
+          </td>
+          <td><span class="status {{ 'completed' if d.status=='approved' else ('rejected' if d.status=='rejected' else 'pending') }}">{{ d.status }}</span></td>
+          <td>
+            {% if d.status == 'pending' %}
+              <div class="deposit-actions" style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+                <form method="post" action="{{ url_for('admin_deposit_action', deposit_id=d.id, action='approve') }}" style="display:inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn success" type="submit" style="min-width:110px">✅ موافقة</button>
+                </form>
+                <form method="post" action="{{ url_for('admin_deposit_action', deposit_id=d.id, action='reject') }}"
+                      style="display:inline"
+                      data-confirm="هل أنت متأكد من رفض هذا الطلب؟">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn danger" type="submit" style="min-width:110px">✖ رفض</button>
+                </form>
+              </div>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

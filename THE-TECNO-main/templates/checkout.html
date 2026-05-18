@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="form card checkout-card">
+  <div class="checkout-game-header">
+    <img src="{{ game_image(game) }}" alt="{{ game.name }}" class="checkout-game-img">
+    <div>
+      <div class="checkout-game-name">{{ game.emoji or '🎮' }} {{ game.name }}</div>
+      <div class="checkout-pkg-name">{{ (product.display_name or product.name)|public_package_name }}</div>
+    </div>
+  </div>
+
+  <div class="checkout-summary">
+    <div class="checkout-summary-row">
+      <span>{{ t("price") }}</span>
+      <strong class="checkout-price">{{ product_price(product, game) }}</strong>
+    </div>
+    {% if current_user %}
+    <div class="checkout-summary-row">
+      <span>{{ "Your balance" if is_en else "رصيدك الحالي" }}</span>
+      <strong class="{% if current_user.balance >= product_sell_usd(product, game) %}balance-ok{% else %}balance-low{% endif %}">
+        {{ wallet_money(current_user.balance) }}
+      </strong>
+    </div>
+    {% set price_usd = product_sell_usd(product, game) %}
+    {% if current_user.balance >= price_usd %}
+    <div class="checkout-summary-row balance-after">
+      <span>{{ "Balance after purchase" if is_en else "الرصيد بعد الشراء" }}</span>
+      <span>{{ wallet_money(current_user.balance - price_usd) }}</span>
+    </div>
+    {% else %}
+    <div class="checkout-insufficient">
+      ⚠️ {{ "Insufficient balance. " if is_en else "رصيدك غير كافٍ. " }}
+      <a href="{{ url_for('wallet') }}#deposit-card">{{ "Top up wallet →" if is_en else "اشحن المحفظة ←" }}</a>
+    </div>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <form method="post" id="checkout-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="checkout-field-label" for="player_id">{{ t("player_id") }}</label>
+    <div class="checkout-id-wrap">
+      <input class="checkout-id-input" name="player_id" id="player_id" required minlength="3" maxlength="64"
+             placeholder="{{ t('example_id') }}" autocomplete="off" inputmode="numeric">
+    </div>
+    <span class="field-error" id="err-player-id"></span>
+    {% if player_validation_enabled %}
+    <div class="player-validate-row">
+      <button type="button" class="btn ghost player-validate-btn" id="validate-player-btn"
+              data-product-id="{{ product.id }}">
+        <span id="vp-btn-idle">🔍 {{ "Verify name" if is_en else "تحقق من الاسم" }}</span>
+        <span id="vp-btn-loading" style="display:none">⏳ {{ "Checking..." if is_en else "جارٍ التحقق..." }}</span>
+      </button>
+      <div class="player-validate-result" id="vp-result" aria-live="polite"></div>
+    </div>
+    {% endif %}
+    <p class="muted checkout-id-hint">
+      {{ "Make sure the Player ID is correct. Top-ups cannot be reversed." if is_en else "تأكد من صحة معرف اللاعب. لا يمكن استرداد الشحنة بعد التنفيذ." }}
+    </p>
+    <button class="btn primary checkout-confirm-btn" type="submit" id="checkout-btn" style="margin-top:18px;width:100%">
+      <span id="checkout-btn-text">✅ {{ t("confirm_order") }}</span>
+      <span id="checkout-btn-loading" style="display:none">⏳ {{ "Processing..." if is_en else "جارٍ المعالجة..." }}</span>
+    </button>
+  </form>
+</div>
+
+<script nonce="{{ csp_nonce }}">
+function clearPlayerErr() {
+  document.getElementById('err-player-id').textContent = '';
+  document.getElementById('player_id').classList.remove('input-err');
+  // V71: عند تعديل الـ ID نمسح نتيجة التحقق السابقة (لا تعود صالحة).
+  var vpResult = document.getElementById('vp-result');
+  if (vpResult) {
+    vpResult.textContent = '';
+    vpResult.className = 'player-validate-result';
+  }
+}
+// V70 CSP: bind input listener via JS instead of an inline attribute.
+document.getElementById('player_id').addEventListener('input', clearPlayerErr);
+document.getElementById('checkout-form').addEventListener('submit', function(e) {
+  var pid = document.getElementById('player_id').value.trim();
+  if (pid.length < 3) {
+    document.getElementById('err-player-id').textContent = '{{ "Player ID must be at least 3 characters" if is_en else "معرف اللاعب يجب أن يكون 3 أحرف على الأقل" }}';
+    document.getElementById('player_id').classList.add('input-err');
+    e.preventDefault(); return;
+  }
+  var btn = document.getElementById('checkout-btn');
+  document.getElementById('checkout-btn-text').style.display = 'none';
+  document.getElementById('checkout-btn-loading').style.display = '';
+  btn.disabled = true;
+});
+
+{% if player_validation_enabled %}
+// V71: زر "تحقق من الاسم" - يستدعي /api/validate-player ويعرض الاسم.
+(function() {
+  var IS_EN = {{ 'true' if is_en else 'false' }};
+  var T = {
+    minLen:       IS_EN ? 'Enter at least 3 characters' : 'أدخل 3 أحرف على الأقل',
+    btnIdle:      IS_EN ? '🔍 Verify name' : '🔍 تحقق من الاسم',
+    btnReverify:  IS_EN ? '🔄 Re-check' : '🔄 أعد التحقق',
+    networkErr:   IS_EN ? 'Network error, try again' : 'خطأ بالشبكة، حاول مجدداً',
+    rateLimited:  IS_EN ? 'Too many attempts, wait a moment' : 'محاولات كثيرة، انتظر لحظة',
+    // V71.1: رسالة موحّدة ومختصرة لكل حالات الفشل (سواء ID خطأ أو
+    // أي خطأ آخر من المورد). لا نعرض تفاصيل المورد الفنية للمستخدم.
+    invalidId:    IS_EN ? 'Player ID is incorrect' : 'معرف اللاعب غير صحيح',
+    verifiedOnly: IS_EN ? 'Player ID is valid' : 'معرف اللاعب صحيح',
+    unsupported:  IS_EN ? 'Verification not supported for this package' : 'هذه الباقة لا تدعم التحقق من الاسم',
+    success:      IS_EN ? 'Player' : 'اللاعب',
+  };
+
+  var btn        = document.getElementById('validate-player-btn');
+  var btnIdle    = document.getElementById('vp-btn-idle');
+  var btnLoading = document.getElementById('vp-btn-loading');
+  var resultBox  = document.getElementById('vp-result');
+  var pidInput   = document.getElementById('player_id');
+  if (!btn || !pidInput) return;
+
+  var productId = parseInt(btn.getAttribute('data-product-id'), 10);
+
+  function setResult(kind, text) {
+    // kind: 'ok' | 'warn' | 'err'
+    resultBox.className = 'player-validate-result vp-' + kind;
+    resultBox.textContent = text;
+  }
+
+  function setLoading(on) {
+    btn.disabled = !!on;
+    btnIdle.style.display    = on ? 'none' : '';
+    btnLoading.style.display = on ? ''     : 'none';
+  }
+
+  btn.addEventListener('click', function() {
+    var pid = pidInput.value.trim();
+    if (pid.length < 3) {
+      setResult('err', T.minLen);
+      pidInput.classList.add('input-err');
+      pidInput.focus();
+      return;
+    }
+
+    setResult('', '');
+    setLoading(true);
+
+    var csrfToken = (document.querySelector('input[name="csrf_token"]') || {}).value || '';
+
+    fetch('/api/validate-player', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': csrfToken,
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({ product_id: productId, player_id: pid })
+    })
+    .then(function(r) {
+      if (r.status === 429) { throw { _kind: 'rate' }; }
+      return r.json().then(function(j) { return { status: r.status, body: j }; });
+    })
+    .then(function(res) {
+      var j = res.body || {};
+      if (!j.ok) {
+        // V71.1: رسالة موحّدة - لا نعرض تفاصيل المورد
+        setResult('err', '❌ ' + T.invalidId);
+        pidInput.classList.add('input-err');
+        return;
+      }
+      if (j.enabled === false) {
+        // الإدارة عطّلت الميزة - نخفي الزر
+        btn.style.display = 'none';
+        return;
+      }
+      if (j.success) {
+        if (j.player_name) {
+          setResult('ok', '✅ ' + T.success + ': ' + j.player_name);
+        } else {
+          setResult('ok', '✅ ' + T.verifiedOnly);
+        }
+      } else if (j.unsupported) {
+        // المورد لا يدعم - تنبيه فقط، الشراء مسموح
+        setResult('warn', 'ℹ️ ' + T.unsupported);
+      } else {
+        // V71.1: أي فشل آخر = رسالة موحّدة "ID غير صحيح"
+        setResult('err', '❌ ' + T.invalidId);
+        pidInput.classList.add('input-err');
+      }
+    })
+    .catch(function(err) {
+      if (err && err._kind === 'rate') {
+        setResult('warn', T.rateLimited);
+      } else {
+        setResult('err', T.networkErr);
+      }
+    })
+    .then(function() {
+      setLoading(false);
+      btnIdle.textContent = T.btnReverify;
+    });
+  });
+})();
+{% endif %}
+</script>
+{% endblock %}

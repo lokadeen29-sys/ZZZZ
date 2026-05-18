@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+{# V43: BreadcrumbList JSON-LD #}
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"{{ 'Home' if is_en else 'الرئيسية' }}","item":"https://tecnogems.com/"},{"@type":"ListItem","position":2,"name":"{{ game.name }}","item":"https://tecnogems.com{{ request.path.replace('/legacy','') }}"}]}</script>
+{% if products %}
+{# V43: ItemList of products as Schema.org Product offers #}
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList","itemListElement":[{% for p in products %}{"@type":"ListItem","position":{{ loop.index }},"item":{"@type":"Product","name":"{{ (p.display_name or p.name)|e }}","brand":{"@type":"Brand","name":"{{ game.name|e }}"},"image":"https://tecnogems.com{{ game_image(game) if game_image is defined else '' }}","offers":{"@type":"Offer","priceCurrency":"USD","price":"{{ '%.2f'|format((p.sell_price or 0)|float) }}","availability":"https://schema.org/InStock","url":"https://tecnogems.com{{ request.path.replace('/legacy','') }}"}}}{% if not loop.last %},{% endif %}{% endfor %}]}</script>
+{% endif %}
+
+<section class="page-head">
+  <div>
+    <nav class="tg-breadcrumb" aria-label="breadcrumb">
+      <a href="{{ url_for('home') }}">{{ "Home" if is_en else "الرئيسية" }}</a>
+      <span>›</span>
+      <span>{{ game.emoji or '🎮' }} {{ game.name }}{% if group %} - {{ group.name }}{% endif %}</span>
+    </nav>
+    <h1>{{ game.emoji or '🎮' }} {{ game.name }}{% if group %} - {{ group.name }}{% endif %}</h1>
+    <p class="muted">{{ t("choose_package") }}</p>
+  </div>
+</section>
+
+{% if products %}
+<div class="tg-search-wrap">
+  <input id="productSearch" class="tg-search-input" type="search" placeholder="{{ t('search_package') }}">
+</div>
+
+<div class="products-grid tg-products-skeleton" id="products-grid">
+  {% for p in products %}
+    <div class="product-card searchable-product" data-name="{{ (p.display_name or p.name)|lower }}">
+      <div>
+        <h3>{{ (p.display_name or p.name)|public_package_name }}</h3>
+      </div>
+      <div class="product-bottom">
+        <strong>{{ product_price(p, game) }}</strong>
+        {% if current_user %}
+          <a class="btn primary" href="{{ url_for('checkout', product_id=p.id) }}">{{ t("buy") }}</a>
+        {% else %}
+          <a class="btn primary" href="{{ url_for('auth.login', next=request.path) }}">{{ "Login to buy" if is_en else "سجل للشراء" }}</a>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+<div id="no-products-msg" class="empty-state" style="display:none">{{ "No packages found." if is_en else "لا توجد نتائج." }}</div>
+{% else %}
+  <div class="empty-state">{{ t("no_packages") }}</div>
+{% endif %}
+
+
+{% if current_user and current_user.role == 'admin' and manual_price_edit_enabled %}
+<div class="card" style="margin-top:22px">
+  <h2>تعديل الأسعار اليدوية بالليرة لهذه الباقات</h2>
+  <p class="muted">هذه الحقول تظهر للأدمن فقط.</p>
+  <form method="post" action="{{ url_for('admin_update_manual_syp_prices', provider=provider, game_key=game.game_key) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>الباقة</th><th>السعر اليدوي بالليرة</th><th>نسبة الربح</th></tr></thead>
+        <tbody>
+        {% for p in products %}
+          <tr>
+            <td>{{ (p.display_name or p.name)|public_package_name }}</td>
+            <td><input name="manual_syp_{{ p.id }}" type="number" step="1" min="0" value="{{ '%.0f'|format(p.manual_price_syp or 0) }}" placeholder="مثال 12000"></td>
+            <td>{% set pp = product_profit_percent(p, game) %}{% if pp is not none %}{{ "%.2f"|format(pp) }}%{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn primary" type="submit" style="margin-top:14px">حفظ أسعار الليرة</button>
+  </form>
+</div>
+{% endif %}
+
+<script src="{{ url_for('static', filename='js/pages/products.js') }}" defer nonce="{{ csp_nonce }}"></script>
+{% endblock %}

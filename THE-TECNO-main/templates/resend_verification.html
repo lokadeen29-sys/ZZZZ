@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="auth-card">
+  <h1>إعادة إرسال رابط التفعيل</h1>
+  <p class="muted">اكتب البريد المسجل ليصلك رابط تفعيل جديد.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>البريد الإلكتروني
+      <input type="email" name="email" required>
+    </label>
+    <button class="btn primary" type="submit">إرسال رابط جديد</button>
+  </form>
+</div>
+{% endblock %}

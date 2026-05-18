@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="form card auth-card">
+  <h2>{{ t("login") }}</h2>
+  <form method="post" id="login-form" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label>{{ t("email") }}</label>
+    <input name="email" id="login-email" type="email" required maxlength="120" autocomplete="email"
+           value="{{ prefill_email or '' }}"
+           placeholder="example@email.com">
+    <span class="field-error" id="err-email"></span>
+
+    <label style="margin-top:14px">{{ t("password") }}</label>
+    <div class="pw-wrap">
+      <input name="password" id="login-password" type="password" required maxlength="128" autocomplete="current-password"
+             placeholder="••••••••">
+      <button type="button" class="pw-toggle" data-pw-target="login-password" data-show-id="eye-show-lp" data-hide-id="eye-hide-lp" aria-label="إظهار كلمة المرور">
+        <svg id="eye-show-lp" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg id="eye-hide-lp" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+      </button>
+    </div>
+    <span class="field-error" id="err-password"></span>
+
+    <button class="btn primary" type="submit" style="margin-top:20px;width:100%" id="login-btn">{{ t("login") }}</button>
+
+    {% if google_oauth_enabled %}
+      <div style="display:flex;align-items:center;gap:10px;margin:16px 0;color:#9aa3b2;font-size:12px">
+        <span style="flex:1;height:1px;background:rgba(255,255,255,.12)"></span>
+        {{ "OR" if is_en else "أو" }}
+        <span style="flex:1;height:1px;background:rgba(255,255,255,.12)"></span>
+      </div>
+      <a href="{{ url_for('auth.auth_google_login') }}"
+         class="btn"
+         style="width:100%;display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#1f2937;font-weight:600;border:1px solid #e5e7eb">
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.6-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.6 24 4.6 12.9 4.6 4 13.5 4 24.6S12.9 44.6 24 44.6c11 0 20-8 20-20 0-1.4-.1-2.7-.4-4.1z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 16 19 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.5 29.3 4.6 24 4.6 16.3 4.6 9.7 8.7 6.3 14.7z"/><path fill="#4CAF50" d="M24 44.6c5.2 0 9.9-2 13.5-5.2l-6.2-5.3c-2.1 1.5-4.7 2.4-7.3 2.4-5.3 0-9.7-3.4-11.3-8.1l-6.6 5.1C9.6 40.4 16.2 44.6 24 44.6z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.7 2.1-2.1 3.9-3.9 5.1l6.2 5.3c-.4.4 6.7-4.9 6.7-13.9 0-1.4-.1-2.7-.4-4z"/></svg>
+        {{ "Continue with Google" if is_en else "متابعة باستخدام Google" }}
+      </a>
+    {% endif %}
+
+    <div class="auth-links" style="margin-top:14px">
+      <a href="{{ url_for('auth.forgot_password') }}">{{ t("forgot_password") }}</a>
+      <a href="{{ url_for('auth.resend_verification') }}">{{ t("resend_verification") }}</a>
+    </div>
+    <p class="muted" style="margin-top:16px;text-align:center;font-size:13px">
+      {{ "Don't have an account?" if is_en else "ليس لديك حساب؟" }}
+      <a href="{{ url_for('auth.register') }}" style="color:hsl(var(--primary));font-weight:700">{{ t("register") }}</a>
+    </p>
+  </form>
+</div>
+<script nonce="{{ csp_nonce }}">
+// V70 CSP: replace inline togglePw click handlers with delegation
+// driven by data-pw-target / data-show-id / data-hide-id.
+function togglePw(inputId, showId, hideId) {
+  var inp = document.getElementById(inputId);
+  if (!inp) return;
+  var isHidden = inp.type === 'password';
+  inp.type = isHidden ? 'text' : 'password';
+  var show = document.getElementById(showId);
+  var hide = document.getElementById(hideId);
+  if (show) show.style.display = isHidden ? 'none' : '';
+  if (hide) hide.style.display = isHidden ? '' : 'none';
+}
+document.querySelectorAll('.pw-toggle[data-pw-target]').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    togglePw(btn.dataset.pwTarget, btn.dataset.showId, btn.dataset.hideId);
+  });
+});
+document.getElementById('login-form').addEventListener('submit', function(e) {
+  var ok = true;
+  var email = document.getElementById('login-email');
+  var pass  = document.getElementById('login-password');
+  document.getElementById('err-email').textContent = '';
+  document.getElementById('err-password').textContent = '';
+  if (!email.value.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value)) {
+    document.getElementById('err-email').textContent = '{{ "Enter a valid email" if is_en else "أدخل بريداً إلكترونياً صحيحاً" }}';
+    email.classList.add('input-err'); ok = false;
+  } else { email.classList.remove('input-err'); }
+  if (!pass.value) {
+    document.getElementById('err-password').textContent = '{{ "Password is required" if is_en else "كلمة المرور مطلوبة" }}';
+    pass.classList.add('input-err'); ok = false;
+  } else { pass.classList.remove('input-err'); }
+  if (!ok) e.preventDefault();
+});
+</script>
+{% endblock %}

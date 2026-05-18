@@ -1,0 +1,8 @@
+# V51 task C — development / CI dependencies.
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest==8.3.3
+pytest-flask==1.3.0
+bandit==1.7.10
+pip-audit==2.7.3

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="form card">
+  <h2>تعديل طريقة الدفع</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>الاسم</label>
+    <input name="name" value="{{ method.name }}" required>
+
+    <label>الأيقونة</label>
+    <input name="emoji" value="{{ method.emoji }}" required>
+
+    <label>عملة طريقة الدفع</label>
+    <select name="currency">
+      <option value="USD" {% if method.currency=="USD" %}selected{% endif %}>دولار</option>
+      <option value="SYP" {% if method.currency=="SYP" %}selected{% endif %}>ليرة سورية</option>
+    </select>
+
+    <label>العنوان / الرقم</label>
+    <textarea name="address" rows="4" required>{{ method.address }}</textarea>
+
+    <label>تعليمات الدفع</label>
+    <textarea name="instructions" rows="5" required>{{ method.instructions }}</textarea>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="active" value="1" {% if method.active %}checked{% endif %} style="width:auto">
+      مفعلة
+    </label>
+
+    <button class="btn primary" type="submit" style="margin-top:18px;width:100%">حفظ</button>
+  </form>
+</div>
+{% endblock %}

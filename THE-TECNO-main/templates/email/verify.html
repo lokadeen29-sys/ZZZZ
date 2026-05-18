@@ -1,0 +1,13 @@
+{# V53 REFACTOR (phase 1): account verification email body.
+
+Rendered by services.mail.send_verification_email. Receives:
+- ``link``     (str) — verify URL with token
+- ``base_url`` (str) — site BASE_URL
+#}
+{%- set title = "تفعيل حسابك - TecnoGems" -%}
+{%- set greeting = "مرحبًا بك في TecnoGems!" -%}
+{%- set message = "شكرًا لإنشاء حسابك. لتفعيل بريدك الإلكتروني والبدء في استخدام المنصة، اضغط على الزر أدناه. صلاحية الرابط 24 ساعة." -%}
+{%- set button_text = "تفعيل الحساب" -%}
+{%- set button_url = link -%}
+{%- set footer_note = "إذا لم تقم بإنشاء حساب في TecnoGems، يمكنك تجاهل هذه الرسالة بأمان. هذه رسالة تلقائية، لا تردّ عليها." -%}
+{% include "email/base.html" %}

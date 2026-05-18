@@ -1,0 +1,19 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: en\n"
+
+msgid "Sign in"
+msgstr "Sign in"
+
+msgid "Popular games"
+msgstr "Popular games"
+
+msgid "Top up your favorite titles in just a few clicks."
+msgstr "Top up your favorite titles in just a few clicks."
+
+msgid "Trending now"
+msgstr "Trending now"
+
+msgid "HOT"
+msgstr "HOT"

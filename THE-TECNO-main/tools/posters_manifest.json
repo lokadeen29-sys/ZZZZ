@@ -1,0 +1,202 @@
+{
+  "free_fire": {
+    "name": "Free Fire",
+    "status": "http_403"
+  },
+  "pubg_mobile": {
+    "name": "PUBG Mobile",
+    "status": "http_403"
+  },
+  "fc_mobile": {
+    "name": "FC Mobile",
+    "status": "http_403"
+  },
+  "mobile_legends": {
+    "name": "Mobile Legends",
+    "status": "http_403"
+  },
+  "genshin_impact": {
+    "name": "Genshin Impact",
+    "status": "http_403"
+  },
+  "honkai_star_rail": {
+    "name": "Honkai Star Rail",
+    "status": "http_403"
+  },
+  "honkai_impact_3rd": {
+    "name": "Honkai Impact 3rd",
+    "status": "http_403"
+  },
+  "wuthering_waves": {
+    "name": "Wuthering Waves",
+    "status": "http_403"
+  },
+  "zenless_zone_zero": {
+    "name": "Zenless Zone Zero",
+    "status": "http_403"
+  },
+  "valorant": {
+    "name": "Valorant",
+    "status": "http_403"
+  },
+  "league_of_legends": {
+    "name": "League of Legends",
+    "status": "http_403"
+  },
+  "wild_rift": {
+    "name": "Wild Rift",
+    "status": "http_403"
+  },
+  "call_of_duty_mobile": {
+    "name": "Call of Duty Mobile",
+    "status": "http_403"
+  },
+  "arena_breakout": {
+    "name": "Arena Breakout",
+    "status": "http_403"
+  },
+  "delta_force": {
+    "name": "Delta Force",
+    "status": "http_403"
+  },
+  "rainbow_six_mobile": {
+    "name": "Rainbow Six Mobile",
+    "status": "http_403"
+  },
+  "solo_leveling_arise": {
+    "name": "Solo Leveling Arise",
+    "status": "http_403"
+  },
+  "marvel_rivals": {
+    "name": "Marvel Rivals",
+    "status": "http_403"
+  },
+  "honor_of_kings": {
+    "name": "Honor of Kings",
+    "status": "http_403"
+  },
+  "identity_v": {
+    "name": "Identity V",
+    "status": "http_403"
+  },
+  "blood_strike": {
+    "name": "Blood Strike",
+    "status": "http_403"
+  },
+  "stumble_guys": {
+    "name": "Stumble Guys",
+    "status": "http_403"
+  },
+  "8_ball_pool": {
+    "name": "8 Ball Pool",
+    "status": "http_403"
+  },
+  "yalla_ludo": {
+    "name": "Yalla Ludo",
+    "status": "http_403"
+  },
+  "bigo_live": {
+    "name": "Bigo Live",
+    "status": "http_403"
+  },
+  "poppo_live": {
+    "name": "Poppo Live",
+    "status": "http_403"
+  },
+  "likee": {
+    "name": "Likee",
+    "status": "http_403"
+  },
+  "starmaker": {
+    "name": "Starmaker",
+    "status": "http_403"
+  },
+  "telegram": {
+    "name": "Telegram",
+    "status": "http_403"
+  },
+  "growtopia": {
+    "name": "Growtopia",
+    "status": "http_403"
+  },
+  "pixel_gun_3d": {
+    "name": "Pixel Gun 3D",
+    "status": "http_403"
+  },
+  "sausage_man": {
+    "name": "Sausage Man",
+    "status": "http_403"
+  },
+  "super_sus": {
+    "name": "Super Sus",
+    "status": "http_403"
+  },
+  "eggy_party": {
+    "name": "Eggy Party",
+    "status": "http_403"
+  },
+  "blockman_go": {
+    "name": "Blockman Go",
+    "status": "http_403"
+  },
+  "asphalt_9": {
+    "name": "Asphalt 9",
+    "status": "http_403"
+  },
+  "magic_chess_gogo": {
+    "name": "Magic Chess Gogo",
+    "status": "http_403"
+  },
+  "afk_journey": {
+    "name": "AFK Journey",
+    "status": "http_403"
+  },
+  "whiteout_survival": {
+    "name": "Whiteout Survival",
+    "status": "http_403"
+  },
+  "state_of_survival": {
+    "name": "State of Survival",
+    "status": "http_403"
+  },
+  "puzzles_and_survival": {
+    "name": "Puzzles and Survival",
+    "status": "http_403"
+  },
+  "once_human": {
+    "name": "Once Human",
+    "status": "http_403"
+  },
+  "lifeafter": {
+    "name": "LifeAfter",
+    "status": "http_403"
+  },
+  "undawn": {
+    "name": "Undawn",
+    "status": "http_403"
+  },
+  "tarisland": {
+    "name": "Tarisland",
+    "status": "http_403"
+  },
+  "teamfight_tactics": {
+    "name": "Teamfight Tactics",
+    "status": "http_403"
+  },
+  "love_and_deepspace": {
+    "name": "Love and Deepspace",
+    "status": "http_403"
+  },
+  "shining_nikki": {
+    "name": "Shining Nikki",
+    "status": "http_403"
+  },
+  "lineage2m": {
+    "name": "Lineage2M",
+    "status": "http_403"
+  },
+  "clash_of_clans": {
+    "name": "Clash of Clans",
+    "status": "http_403"
+  }
+}

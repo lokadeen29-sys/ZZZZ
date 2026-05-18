@@ -1,0 +1,66 @@
+{# V53 REFACTOR (phase 1): transactional email layout (Arabic, RTL).
+
+Replaces the inline f-string ``_build_email_html`` that lived in app.py.
+Child templates extend this and override the ``greeting``, ``message``,
+``button_text``, ``button_url``, and ``footer_note`` blocks.
+
+Template variables:
+- ``title``       (str)  — <title> tag and email subject hint
+- ``greeting``    (str)  — top heading inside the card
+- ``message``     (str)  — main body paragraph
+- ``button_text`` (str)  — CTA button label
+- ``button_url``  (str)  — full URL the CTA points to
+- ``footer_note`` (str)  — small footer disclaimer
+- ``base_url``    (str)  — site BASE_URL for the "why this email" link
+
+Anti-spam considerations preserved from V67:
+- Inline CSS only (no external stylesheets)
+- No images (good text/image ratio)
+- Mobile-responsive table layout
+- DOCTYPE + lang/dir attributes
+#}<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ title }}</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0f172a;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#0f172a;">
+<tr><td align="center" style="padding:40px 20px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:520px;background-color:#1e293b;border-radius:16px;border:1px solid #334155;">
+<!-- Header -->
+<tr><td style="padding:32px 32px 0;text-align:center;">
+  <h1 style="margin:0;font-size:28px;font-weight:800;color:#a78bfa;letter-spacing:-0.5px;">TecnoGems</h1>
+  <p style="margin:8px 0 0;font-size:13px;color:#64748b;">منصة شحن الألعاب</p>
+</td></tr>
+<!-- Body -->
+<tr><td style="padding:32px;">
+  <h2 style="margin:0 0 16px;font-size:20px;color:#f1f5f9;font-weight:700;">{{ greeting }}</h2>
+  <p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#cbd5e1;">{{ message }}</p>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr><td align="center">
+    <a href="{{ button_url }}" target="_blank"
+       style="display:inline-block;padding:14px 36px;background-color:#7c3aed;color:#ffffff;font-size:16px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:0.3px;">
+      {{ button_text }}
+    </a>
+  </td></tr>
+  </table>
+  <p style="margin:24px 0 0;font-size:13px;color:#64748b;line-height:1.6;">
+    إذا لم يعمل الزر، انسخ الرابط التالي والصقه في المتصفح:<br>
+    <a href="{{ button_url }}" style="color:#a78bfa;word-break:break-all;font-size:12px;">{{ button_url }}</a>
+  </p>
+</td></tr>
+<!-- Footer -->
+<tr><td style="padding:0 32px 32px;border-top:1px solid #334155;">
+  <p style="margin:20px 0 0;font-size:12px;color:#475569;line-height:1.6;text-align:center;">
+    {{ footer_note }}<br>
+    <a href="{{ base_url }}/email-info" style="color:#64748b;text-decoration:underline;">لماذا وصلتك هذه الرسالة؟</a><br>
+    <span style="color:#64748b;">&copy; TecnoGems - جميع الحقوق محفوظة</span>
+  </p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

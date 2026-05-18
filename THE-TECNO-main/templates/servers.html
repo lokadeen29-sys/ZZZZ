@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <h1>اختر السيرفر</h1>
+  {% if show_server1 or show_server2 %}
+  <div class="grid two">
+    {% if show_server1 %}
+    <a class="card server-card" href="{{ url_for('games', provider='server1') }}">
+      <div class="game-thumb server">🖥️</div>
+      <h2>سيرفر 1</h2>
+      <p class="muted">الألعاب والباقات الخاصة بالسيرفر الأول.</p>
+    </a>
+    {% endif %}
+    {% if show_server2 %}
+    <a class="card server-card" href="{{ url_for('games', provider='server2') }}">
+      <div class="game-thumb server">🚀</div>
+      <h2>سيرفر 2</h2>
+      <p class="muted">Free Fire و PUBG Mobile.</p>
+    </a>
+    {% endif %}
+  </div>
+  {% else %}
+    <div class="card">
+      <h2>لا توجد سيرفرات متاحة حاليًا</h2>
+      <p class="muted">يرجى التواصل مع الدعم.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
