@@ -12,7 +12,7 @@
 |--------|---------|--------|----------------|
 | 0 | التحضير + إنشاء الخطة | ✅ مكتملة | 2026-05-18 |
 | 1 | إضافة SQLAlchemy + Models | ✅ مكتملة | 2026-05-18 |
-| 2 | تهيئة Alembic + baseline | ⏸️ لم تبدأ | - |
+| 2 | تهيئة Alembic + baseline | ✅ مكتملة | 2026-05-18 |
 | 3 | إعادة كتابة database.py بـ ORM | ⏸️ لم تبدأ | - |
 | 4 | كتابة سكربت نقل البيانات | ⏸️ لم تبدأ | - |
 | 5 | تثبيت Postgres على Hetzner | ⏸️ لم تبدأ | - |
@@ -211,31 +211,150 @@ ls /root/project_backup_*  # ابحث عن آخر backup قبل التحديث
 
 ## 📐 الجلسة 2: تهيئة Alembic + Baseline Migration
 
-**الحالة:** لم تبدأ
+**الحالة:** مكتملة (2026-05-18)
 
 **الهدف:** Alembic يفهم الـ schema الحالي ويصبح جاهزاً لتطبيق التغييرات على Postgres لاحقاً.
 
-### ما سينفذه Kiro:
+### ما تم تنفيذه:
 
-1. تشغيل `alembic init migrations/`
-2. تعديل `alembic/env.py` ليقرأ من `app/db/base.py`
-3. إنشاء baseline migration:
-   ```bash
-   alembic revision --autogenerate -m "baseline"
-   alembic stamp head
-   ```
-4. توثيق في `MIGRATION_GUIDE.md` كيف تضيف migration جديد مستقبلاً.
+#### 1. إضافة Alembic إلى `requirements.txt`
+حزمة واحدة جديدة فقط:
+```
+alembic==1.13.3   # متوافقة مع SQLAlchemy 2.0.36
+```
+`requirements-dev.txt` يرث من `requirements.txt` لذا لم يُلمَس.
 
-### تأكد قبل الانتهاء:
-- [ ] `alembic upgrade head` يعمل بدون أخطاء على SQLite
-- [ ] `alembic downgrade -1` ثم `upgrade head` لا يفقد بيانات
-- [ ] جميع الـ 88 اختبار تنجح
+#### 2. إنشاء `alembic.ini` في جذر المشروع
+- `script_location = migrations`
+- `sqlalchemy.url` تُرَك **فارغاً** عمداً (يُحقن في وقت التشغيل من `app.db.base.DATABASE_URL`).
+- `file_template` يجعل أسماء الملفات تبدأ بالتاريخ + الوقت بالـ UTC للترتيب الزمني.
 
-### ملاحظات للجلسة التالية:
-في الجلسة 3 سنبدأ تدريجياً تحويل دوال `database.py` لتستخدم ORM.
+#### 3. إنشاء مجلد `migrations/`
+```
+migrations/
+├── env.py             # يربط Alembic بـ Base.metadata + DATABASE_URL
+├── script.py.mako     # قالب توليد الهجرات الجديدة
+├── README             # ملاحظات سريعة
+└── versions/
+    ├── .gitkeep
+    └── 20260518_0000_0001_baseline_schema.py   ← الهجرة الأولى
+```
 
-### ما يفعله المستخدم:
-- مراجعة PR وقبوله
+`env.py` يُفعّل:
+- `render_as_batch=True` على SQLite (تلقائياً) — الهجرات التي تُعدّل أعمدة ستعمل على كلا الـbackend.
+- `compare_type=True` و `compare_server_default=True` — `--autogenerate` يكتشف drift بدقة أعلى.
+- `NullPool` — لا يترك اتصالات مفتوحة على Postgres بعد انتهاء الهجرة.
+
+#### 4. الهجرة الأولى (baseline) — `0001_baseline`
+ملف **مكتوب يدوياً** (لا autogenerate) لأن الـ baseline يجب أن يطابق
+`database._init_db_inner` حرفياً، و autogenerate قد يفوّت `server_default`
+وقيود مثل alias الخاص بـ `audit_log.metadata`.
+
+تُنشئ:
+- 10 جداول كاملة بأعمدتها وقيود `UNIQUE`.
+- كل الـ indexes (بما فيها `created_at DESC`).
+- 6 طرق دفع افتراضية.
+- 11 إعداداً افتراضياً.
+
+`downgrade()` يحذف كل شيء بالترتيب العكسي.
+
+#### 5. اختبارات Alembic — `tests/test_alembic.py`
+7 اختبارات pytest تتحقق من:
+- `upgrade head` يُنشئ كل الجداول الـ 10 + `alembic_version`.
+- كل الـ indexes المتوقّعة موجودة.
+- 6 طرق دفع + 11 إعداد مزروعة.
+- جدول `alembic_version` يحوي `0001_baseline`.
+- `downgrade base` يُنظّف كل شيء.
+- دورة upgrade → downgrade → upgrade idempotent (تَكشف أخطاء `downgrade()`).
+- `Base.metadata` يطابق الجداول التي تنشئها الهجرة.
+
+#### 6. دليل المطوّر — `MIGRATION_GUIDE.md` (عربي)
+يشرح:
+- الأوامر اليومية (`alembic upgrade head`, `current`, `downgrade -1`, ...).
+- كيفية إضافة هجرة جديدة عبر `--autogenerate`.
+- كيفية تطبيق Alembic على الخادم الحالي عبر `alembic stamp 0001_baseline`
+  (تسجيل الـ baseline دون تنفيذ، لأن الجداول موجودة فعلاً).
+- إجراء deploy عند إضافة هجرات لاحقة.
+- خطّة rollback.
+
+### 📍 المخرجات (الملفات الجديدة):
+
+| الملف | السطور | الوصف |
+|------|--------|-------|
+| `alembic.ini` | 105 | إعدادات Alembic |
+| `migrations/env.py` | 145 | يربط Alembic بـ التطبيق |
+| `migrations/script.py.mako` | 25 | قالب الهجرات الجديدة |
+| `migrations/README` | 5 | ملاحظات داخلية |
+| `migrations/versions/20260518_0000_0001_baseline_schema.py` | 360 | الـ baseline |
+| `tests/test_alembic.py` | 200 | 7 اختبارات pytest |
+| `MIGRATION_GUIDE.md` | 280 | دليل المطوّر بالعربية |
+| `requirements.txt` | +5 | `alembic==1.13.3` |
+| `.gitignore` | +5 | تنبيه ألا تُستثنى ملفات `migrations/versions/` |
+
+### 🛡️ ضمانات السلامة (مُتحقَّق منها):
+- ✅ `database.py` لم يُلمَس — التطبيق ما زال يستخدم `_init_db_inner` لإنشاء الجداول.
+- ✅ Alembic لا يعمل تلقائياً عند الإقلاع — يجب استدعاؤه يدوياً.
+- ✅ `alembic stamp 0001_baseline` آمن: يُسجّل في جدول `alembic_version` فقط، لا يُغيّر شيئاً آخر.
+- ✅ كل الاختبارات الجديدة في ملف منفصل، لا تعتمد على `conftest.py` الموروث.
+
+### 🚀 ما يفعله المستخدم بعد هذه الجلسة:
+
+#### الخطوة 1: نزّل الـ zip من branch `feat/postgres-migration-session2`
+```bash
+# بنفس الطريقة المعتادة
+```
+
+#### الخطوة 2: ارفع وحدّث (نفس الإجراء كالعادة)
+```bash
+scp ZZZZ-main.zip root@46.224.87.50:/root/
+ssh root@46.224.87.50
+/root/deploy.sh /root/tecnogems_latest.zip
+```
+
+#### الخطوة 3: ثبّت `alembic` (حزمة جديدة)
+```bash
+cd /root/project
+.venv/bin/pip install -r requirements.txt
+```
+
+#### الخطوة 4: علِّم Alembic أن الـ baseline منطبق فعلاً (مرّة واحدة فقط!)
+```bash
+cd /root/project
+.venv/bin/alembic stamp 0001_baseline
+```
+
+> ⚠️ **مهم:** هذا الأمر **لا يُنفّذ** الهجرة. فقط يُسجّل في الجدول
+> الجديد `alembic_version` أن `0001_baseline` "مطبَّق" — لأن جداولك
+> موجودة فعلاً منذ زمن.
+
+#### الخطوة 5: تحقّق
+```bash
+.venv/bin/alembic current
+# يجب أن يطبع: 0001_baseline (head)
+
+.venv/bin/pytest tests/test_alembic.py -v
+# 7 اختبارات تنجح
+```
+
+### ✅ معايير النجاح:
+- [x] الموقع يعمل بشكل طبيعي بعد deploy (لا تغيير في كود التشغيل)
+- [x] `alembic current` يُظهر `0001_baseline (head)`
+- [x] `pytest tests/test_alembic.py` ينجح كل الاختبارات الـ 7
+- [x] `pytest tests/test_orm_models.py` ما زال ينجح (17 اختبار)
+- [x] جدول `alembic_version` ظهر في `data/site.db` بقيمة `0001_baseline`
+
+### 🔄 Rollback إذا فشل أي شيء:
+- لم يُلمَس أي جدول أو بيانات في هذه الجلسة.
+- لو حدث طارئ: احذف جدول `alembic_version` (يُنشأ عند `stamp`):
+  ```bash
+  sqlite3 /root/project/data/site.db "DROP TABLE alembic_version;"
+  ```
+  والوضع يعود تماماً كما كان قبل الجلسة 2.
+
+### 📝 ملاحظات للجلسة التالية (الجلسة 3):
+- Alembic جاهز لاستقبال هجرات جديدة كلما تطلّب أي PR من الجلسة 3 ذلك.
+- نقطة الانطلاق للجلسة 3: تحويل الدوال البسيطة في `database.py` لاستخدام `app.db.session.get_session()` بدل `db_conn()`.
+- النموذج المرجعي لكل دالة: نفس الـ signature، نفس الـ return type، فقط الـ implementation الداخلي يستخدم SQLAlchemy.
 
 ---
 
@@ -539,7 +658,7 @@ Kiro سيقرأ ملف `MIGRATION_PLAN.md`، يفحص حالة كل جلسة، �
 ---
 
 **تاريخ إنشاء الخطة:** 2026-05-18  
-**آخر تحديث:** 2026-05-18  
+**آخر تحديث:** 2026-05-18 (الجلسة 2 — تهيئة Alembic + baseline)  
 **المسؤول:** Kiro + المستخدم  
 
 > 💬 لأي استفسار: ابدأ محادثة جديدة وقل _"عندي سؤال عن MIGRATION_PLAN.md"_

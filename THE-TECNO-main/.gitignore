@@ -16,3 +16,9 @@ venv/
 *.sqlite
 *.sqlite3
 rq.db
+
+
+# V72 (Postgres migration phase 2): Alembic notes.
+# `migrations/versions/*.py` are SOURCE files — they MUST be committed.
+# Only the bytecode cache is ignored (already covered by `__pycache__/`
+# above). Do NOT add `migrations/` or `migrations/versions/` here.

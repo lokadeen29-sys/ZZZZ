@@ -1,0 +1,5 @@
+Generic single-database configuration for Alembic.
+
+See ../MIGRATION_GUIDE.md (Arabic) for the full workflow:
+how to create a new migration, how to upgrade/downgrade,
+and how the SQLite → Postgres switch works in production.
