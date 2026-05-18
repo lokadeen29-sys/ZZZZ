@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+{# V69: شعار النجاح بعد إرسال طلب الشحن.
+   كان سابقًا يُرسَل عبر flash() — وهذا تسبّب في أن يظل الإشعار يظهر
+   مع كل تحديث للصفحة (F5) بسبب bfcache + StaleWhileRevalidate في
+   service worker. الآن نمرّره عبر query string `?deposit_ok=<code>`،
+   ونمسحه من شريط العنوان عبر history.replaceState فور عرض الـ toast
+   (انظر السكريبت أسفل الصفحة)، فلا يبقى أثر له بعد أول refresh. #}
+{% if deposit_ok %}
+<div class="messages" id="tg-deposit-success-wrap">
+  <div class="alert success">
+    <div class="tg-deposit-toast">
+      <span class="tg-deposit-toast__icon" aria-hidden="true">✓</span>
+      <div class="tg-deposit-toast__body">
+        <div class="tg-deposit-toast__title">
+          تم استلام طلب الشحن رقم <strong>{{ deposit_ok }}</strong> بنجاح
+        </div>
+        <div class="tg-deposit-toast__desc">
+          طلبك الآن قيد المراجعة من قبل الإدارة، وسيُضاف الرصيد إلى محفظتك فور الموافقة.
+          <a href="{{ url_for('wallet_transactions') }}" class="tg-deposit-toast__link">متابعة حالة الطلب</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+<section style="padding:34px 0">
+  <div class="grid two">
+    <div class="card">
+      <h1>{{ t("wallet") }}</h1>
+      <p class="muted">{{ t("available_balance") }}</p>
+      <div class="price">{{ wallet_money(current_user.balance) }}</div>
+      <p>{{ t("support") }}: <strong>{{ support }}</strong></p>
+      <div class="links">
+        <a class="btn" href="{{ url_for('wallet_transactions') }}">{{ t("wallet_records") }}</a>
+      </div>
+    </div>
+
+    <div class="card" id="deposit-card">
+      <h2>شحن {{ t("wallet") }}</h2>
+      {% if methods %}
+      <form id="deposit" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>{{ t("amount") }}</label>
+        <input name="amount" type="number" step="0.01" min="0.01" max="100000000" required>
+        <p class="muted">أدخل {{ t("amount") }} حسب عملة {{ t("payment_method") }} المختارة.</p>
+
+        <label>{{ t("payment_method") }}</label>
+        <select name="method_id" id="payment-method" required>
+          {% for m in methods %}
+            <option value="{{ m.id }}" data-currency="{{ m.currency }}" data-address="{{ m.address }}" data-instructions="{{ m.instructions }}">{{ m.emoji }} {{ m.name }} — {{ "ليرة سورية" if m.currency=="SYP" else "دولار" }}</option>
+          {% endfor %}
+        </select>
+
+        <div class="payment-method-card">
+          <strong>{{ t("method_currency") }}: <span id="method-currency"></span></strong>
+          <hr style="border-color:rgba(255,255,255,.08)">
+          <strong>{{ t("address") }}:</strong>
+          <div id="method-address" style="margin-top:8px;white-space:pre-wrap"></div>
+          <hr style="border-color:rgba(255,255,255,.08)">
+          <div id="method-instructions" class="muted" style="white-space:pre-wrap"></div>
+        </div>
+
+        <label>رقم العملية أو ملاحظة <span class="muted">(اختياري)</span></label>
+        <textarea name="proof" rows="3" maxlength="2000" placeholder="ضع رقم العملية أو أي تفاصيل تثبت الدفع — اختياري"></textarea>
+
+        <label>رفع صورة الإيصال <span class="muted">(اختياري)</span></label>
+        <input class="file-input" type="file" name="proof_image" accept="image/*">
+        <p class="muted" style="margin:6px 0 0;font-size:13px">
+          الإيصال غير مطلوب — تتم مراجعة الطلبات يدويًا من الإدارة.
+        </p>
+
+        <button class="btn primary" type="submit" style="margin-top:18px;width:100%">{{ t("submit_deposit") }}</button>
+      </form>
+      {% else %}
+        <p class="muted">لا توجد طرق دفع مفعّلة حاليًا.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+function updatePaymentInfo(){
+  const sel = document.getElementById('payment-method');
+  if(!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const cur = opt.dataset.currency || 'USD';
+  document.getElementById('method-currency').innerText = cur === 'SYP' ? 'ليرة سورية' : 'دولار';
+  document.getElementById('method-address').innerText = opt.dataset.address || '';
+  document.getElementById('method-instructions').innerText = opt.dataset.instructions || '';
+}
+document.addEventListener('DOMContentLoaded', updatePaymentInfo);
+document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='payment-method') updatePaymentInfo(); });
+
+// V69: إزالة معامل deposit_ok من الـ URL فور عرض الإشعار، حتى لا
+// يعود للظهور عند تحديث الصفحة. (replaceState لا يُعيد تحميل
+// الصفحة ولا يُضيف إلى تاريخ التصفح.)
+(function(){
+  try {
+    var url = new URL(window.location.href);
+    if (url.searchParams.has('deposit_ok')) {
+      url.searchParams.delete('deposit_ok');
+      var clean = url.pathname + (url.search ? url.search : '') + url.hash;
+      window.history.replaceState({}, document.title, clean);
+    }
+  } catch (e) { /* المتصفحات القديمة: تجاهل */ }
+})();
+
+// V69.1: قفل فوري لزر "إرسال طلب الشحن" قبل تحميل app.js — يمنع
+// الإرسال المزدوج (المستخدم يضغط ثم يضغط ثانية بسبب بطء الشبكة،
+// فيُنشَأ طلبان متطابقان). نُطبّقه inline حتى يكون فعّالاً حتى لو
+// لم يكن app.js قد حُمّل بعد. يُعزّزه أيضاً منع الـ idempotency على
+// الخادم في create_deposit (نافذة 60 ثانية).
+(function(){
+  var form = document.getElementById('deposit');
+  if (!form) return;
+  var locked = false;
+  form.addEventListener('submit', function(e){
+    if (locked) {
+      e.preventDefault();
+      e.stopPropagation();
+      return false;
+    }
+    locked = true;
+    var btn = form.querySelector('button[type="submit"]');
+    if (btn) {
+      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
+      if (!btn.dataset._origText) btn.dataset._origText = btn.innerText;
+      btn.innerText = 'جارٍ الإرسال...';
+    }
+    // أمان: لو فشل الإرسال (تحقق من المتصفح، خطأ شبكة)، أعد الفتح
+    // بعد ١٢ ثانية حتى لا يبقى الزر معطّلاً للأبد.
+    setTimeout(function(){
+      locked = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.removeAttribute('aria-disabled');
+        if (btn.dataset._origText) btn.innerText = btn.dataset._origText;
+      }
+    }, 12000);
+  });
+})();
+</script>
+{% endblock %}

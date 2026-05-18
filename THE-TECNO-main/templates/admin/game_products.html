@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <h1>تقسيم وترتيب باقات {{ game.name }}</h1>
+  <p class="muted">يمكنك إنشاء واجهات عرض داخل نفس اللعبة مثل: شدات، بطاقات، عروض. إذا كان ترتيب الباقة 0 فلن تظهر في الواجهة.</p>
+
+  <div class="card" style="margin-bottom:18px">
+    <h2>إنشاء قسم جديدة</h2>
+    <form method="post" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="create_group">
+      <label>اسم القسم
+        <input name="group_name" placeholder="مثال: شدات أو بطاقات" required>
+      </label>
+      <label>رابط الصورة
+        <input name="group_image_url" placeholder="اتركه فارغًا لاستخدام صورة اللعبة">
+      </label>
+      <label>الترتيب
+        <input name="group_sort_order" type="number" value="1">
+      </label>
+      <label style="display:flex;gap:10px;align-items:center">
+        <input type="checkbox" name="group_active" value="1" checked style="width:auto">
+        مفعلة
+      </label>
+      <button class="btn primary" type="submit">إضافة قسم</button>
+    </form>
+  </div>
+
+  {% if groups %}
+  <div class="card" style="margin-bottom:18px">
+    <h2>الأقسام الحالية</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>الاسم</th><th>الصورة</th><th>الترتيب</th><th>مفعلة</th><th>حفظ</th><th>حذف</th></tr></thead>
+        <tbody>
+        {% for g in groups %}
+          <tr>
+            <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="group_id" value="{{ g.id }}">
+              <td><input name="group_name" value="{{ g.name }}"></td>
+              <td><input name="group_image_url" value="{{ g.image_url or '' }}"></td>
+              <td><input name="group_sort_order" type="number" value="{{ g.sort_order or 1 }}" style="width:90px"></td>
+              <td><input type="checkbox" name="group_active" value="1" {% if g.active %}checked{% endif %}></td>
+              <td><button class="btn small" name="action" value="update_group" type="submit">حفظ</button></td>
+              <td><button class="btn small danger" name="action" value="delete_group" type="submit" data-confirm="حذف القسم؟ سيتم إرجاع باقاتها إلى عام.">حذف</button></td>
+            </form>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+  <form method="post" id="products-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save_products">
+    <div class="links" style="margin-bottom:16px">
+      <button class="btn primary" type="submit">حفظ الباقات</button>
+      <a class="btn" href="{{ url_for('admin_games') }}">رجوع للألعاب</a>
+    </div>
+
+    <div class="tg-search-wrap">
+      <input id="adminProductSearch" class="tg-search-input" type="search" placeholder="🔍 ابحث عن باقة لتقسيمها...">
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الترتيب</th>
+            <th>واجهة العرض</th>
+            <th>الباقة</th>
+            <th>السعر الداخلي</th><th>سعر الواجهة</th><th>نسبة الربح</th>
+            <th>الحالة</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in products %}
+          <tr class="admin-product-row">
+            <td><input name="sort_{{ p.id }}" type="number" value="{{ p.sort_order if p.sort_order is not none else loop.index }}" style="width:90px"></td>
+            <td>
+              <select name="group_{{ p.id }}">
+                <option value="">عام / بدون تقسيم</option>
+                {% for g in groups %}
+                  <option value="{{ g.id }}" {% if p.group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>{{ (p.display_name or p.name)|public_package_name }}</td>
+            <td>{{ "%.4f"|format(p.sell_price) }}$<br><small class="muted">التكلفة: {{ "%.4f"|format(p.base_price) }}$</small></td>
+            <td>{{ product_price(p, game) }}</td>
+            <td>
+              {% set pp = product_profit_percent(p) %}
+              {% if pp is not none %}
+                {{ "%.2f"|format(pp) }}%
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>{{ "مفعلة" if p.active else "معطلة" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <button class="btn primary" type="submit" style="margin-top:18px">حفظ الباقات</button>
+  </form>
+</section>
+
+<script nonce="{{ csp_nonce }}">
+(function(){
+  const input = document.getElementById('adminProductSearch');
+  if (!input) return;
+  const rows = Array.from(document.querySelectorAll('.admin-product-row'));
+  input.addEventListener('input', function(){
+    const q = this.value.trim().toLowerCase();
+    rows.forEach(row => row.style.display = row.innerText.toLowerCase().includes(q) ? '' : 'none');
+  });
+})();
+</script>
+{% endblock %}

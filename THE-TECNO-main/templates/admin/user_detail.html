@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <a class="btn" href="{{ url_for('admin_users') }}">← رجوع للمستخدمين</a>
+  <h1>تفاصيل المستخدم #{{ u.id }}</h1>
+
+  <div class="grid two">
+    <div class="card">
+      <h2>{{ u.name }}</h2>
+      <p><b>البريد:</b> {{ u.email }}</p>
+      <p><b>الهاتف:</b> {{ u.phone or '-' }}</p>
+      <p><b>الرصيد:</b> {{ wallet_money(u.balance) }}</p>
+      <p><b>الدور:</b> {{ u.role }}</p>
+    </div>
+    <div class="card">
+      <h2>الملخص</h2>
+      <p><b>عدد طلبات الشحن:</b> {{ summary.deposits_count }}</p>
+      <p><b>طلبات الشحن المقبولة:</b> {{ summary.deposits_approved }}</p>
+      <p><b>إجمالي مبالغ الشحن المدفوعة:</b> {{ wallet_money(summary.deposits_total_paid) }}</p>
+      <p><b>عدد الطلبات:</b> {{ summary.orders_count }}</p>
+      <p><b>إجمالي العمليات:</b> {{ wallet_money(summary.orders_total) }}</p>
+    </div>
+  </div>
+
+  <h2>طلبات الشحن</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>الكود</th><th>المبلغ المدفوع</th><th>الطريقة</th><th>الإثبات</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+      <tbody>
+      {% for d in deposits %}
+      <tr>
+        <td>{{ d.deposit_code }}</td>
+        <td>{{ "%.2f"|format(d.amount) }} {{ "ل.س" if d.currency=="SYP" else "$" }}</td>
+        <td>{{ d.method }}</td>
+        <td style="max-width:300px;white-space:normal">{{ d.proof }}</td>
+        <td>{{ d.status }}</td>
+        <td>{{ d.created_at|syria_time }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">لا توجد طلبات شحن.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>كل الطلبات والعمليات</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>الطلب</th><th>اللعبة</th><th>الباقة</th><th>ID اللاعب</th><th>السعر</th><th>الحالة</th><th>التاريخ</th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o.order_code }}</td>
+        <td>{{ o.game_name or o.game_key }}</td>
+        <td>{{ (o.game_name or o.game_key) }} - {{ o.product_name|public_package_name }}</td>
+        <td><code>{{ o.player_id }}</code></td>
+        <td>{{ wallet_money(o.price) }}</td>
+        <td>{{ o.status }}</td>
+        <td>{{ o.created_at|syria_time }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">لا توجد عمليات.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

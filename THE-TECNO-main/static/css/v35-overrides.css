@@ -1,0 +1,86 @@
+/* V35 overrides — fixes contact buttons, hero sizing, cards, alerts.
+   Loaded AFTER style.min.css so these win. */
+
+/* ---- Floating support stack (WhatsApp + Telegram), fixed bottom ---- */
+.tg-support-floating, .tg-contact-stack { display: none !important; } /* kill any legacy markup */
+
+.tg-support-stack {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+.tg-support-stack .tg-support-fab {
+  pointer-events: auto;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff !important;
+  text-decoration: none;
+  box-shadow: 0 12px 28px rgba(0,0,0,.32);
+  border: 0;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.tg-support-stack .tg-support-fab:hover { transform: translateY(-2px) scale(1.05); }
+.tg-fab-wa { background: #25D366; }
+.tg-fab-tg { background: #229ED9; }
+
+@media (max-width: 480px) {
+  .tg-support-stack { left: 12px; bottom: 12px; gap: 10px; }
+  .tg-support-stack .tg-support-fab { width: 48px; height: 48px; }
+  .tg-support-stack .tg-support-fab svg { width: 22px; height: 22px; }
+}
+
+/* ---- Inline language switcher (replaces tg-lang-corner) ---- */
+.tg-lang-corner { display: none !important; }
+.tg-lang-inline {
+  margin-inline-start: auto;
+  padding: 6px 10px !important;
+  border-radius: 999px !important;
+  border: 1px solid hsl(var(--border));
+  font-size: 12px !important;
+  font-weight: 800;
+  opacity: .85;
+}
+.tg-lang-inline:hover { opacity: 1; }
+
+/* ---- Smaller logo to match displayed size ---- */
+.tg-brand img { width: auto; height: 44px; max-width: 160px; object-fit: contain; border-radius: 0; }
+
+/* ---- Hero on mobile ---- */
+@media (max-width: 640px) {
+  .tg-hero { min-height: 420px; border-radius: 0 0 24px 24px; }
+  .tg-hero h1 { font-size: clamp(28px, 7vw, 48px) !important; }
+  .tg-hero p { font-size: 15px; }
+  .tg-hero-content { padding: 56px 0 64px; }
+}
+
+/* ---- Game cards: less tall on mobile ---- */
+.tg-game-cover { aspect-ratio: 4 / 5 !important; }
+
+/* ---- Flash alerts: close button + animation ---- */
+.alert { position: relative; animation: tgFadeIn .35s ease; }
+@keyframes tgFadeIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.alert .alert-close {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 8px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font-size: 20px;
+  cursor: pointer;
+  opacity: .6;
+  line-height: 1;
+}
+.alert .alert-close:hover { opacity: 1; }
+
+/* ---- Avoid overlap with floating buttons ---- */
+.footer { padding-bottom: 90px; }

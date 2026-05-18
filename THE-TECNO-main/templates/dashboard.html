@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <div class="grid two">
+    <div class="card">
+      <h2>مرحبًا {{ current_user.name }}</h2>
+      <p class="muted">رصيدك الحالي</p>
+      <div class="price">{{ wallet_money(current_user.balance) }}</div>
+      <div class="links" style="margin-top:18px">
+        <a class="btn primary" href="{{ url_for('servers') }}">شراء باقة</a>
+        <a class="btn" href="{{ url_for('wallet') }}">شحن المحفظة</a>
+      </div>
+    </div>
+    <div class="card">
+      <h2>آخر الطلبات</h2>
+      {% if orders %}
+        {% for o in orders %}
+          <p>
+            <span class="status {{ o.status|order_status_class }}">{{ o.status|order_status_label }}</span>
+            {{ o.order_code }} — {{ o.game_name }} — ID: {{ o.player_id }} — {{ o.created_at|syria_time }}
+          </p>
+        {% endfor %}
+      {% else %}
+        <p class="muted">لا توجد طلبات بعد.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

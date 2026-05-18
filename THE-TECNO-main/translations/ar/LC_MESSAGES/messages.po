@@ -1,0 +1,19 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ar\n"
+
+msgid "Sign in"
+msgstr "تسجيل الدخول"
+
+msgid "Popular games"
+msgstr "الألعاب الأكثر طلبًا"
+
+msgid "Top up your favorite titles in just a few clicks."
+msgstr "اشحن ألعابك المفضلة بنقرات قليلة."
+
+msgid "Trending now"
+msgstr "الأكثر رواجًا"
+
+msgid "HOT"
+msgstr "الأكثر طلبًا"

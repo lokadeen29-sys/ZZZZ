@@ -1,0 +1,18 @@
+.env
+*.db
+data/
+static/uploads/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+# V50.2 LOW: the dev-only fallback secret persisted by app.py. Committing
+# it would defeat its purpose (stable session signing key). In prod we use
+# SECRET_KEY from env and this file is never created.
+.secret_key
+# V50.2 LOW: local logs / sqlite artefacts / rq dumps should stay out of git.
+*.log
+*.sqlite
+*.sqlite3
+rq.db

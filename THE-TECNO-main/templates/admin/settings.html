@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="form card">
+  <h2>الإعدادات العامة</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>حساب / رابط الدعم</label>
+    <input name="support_contact" value="{{ support }}" placeholder="@support أو رابط واتساب أو رقم هاتف" required>
+
+    <label>سعر صرف الدولار مقابل الليرة السورية</label>
+    <input name="usd_syp_rate" type="number" step="0.01" min="1" value="{{ usd_syp_rate }}" required>
+
+    <h2>إعدادات التسعير</h2>
+    <label>نظام التسعير</label>
+    <select name="pricing_mode">
+      <option value="usd" {% if selected_pricing_mode=="usd" %}selected{% endif %}>تسعير بالدولار</option>
+      <option value="auto_syp" {% if selected_pricing_mode=="auto_syp" %}selected{% endif %}>تسعير بالليرة حسب الدولار</option>
+    </select>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="manual_price_edit_enabled" value="1" {% if manual_price_edit_enabled_setting=="1" %}checked{% endif %} style="width:auto">
+      تفعيل الأسعار اليدوية بالليرة وتعديلها من واجهة اللعبة للأدمن
+    </label>
+    <p class="muted">عند التفعيل: السعر اليدوي بالليرة يتجاوز نظام التسعير الأساسي فقط للباقات التي وضعت لها سعرًا يدويًا. عند إلغاء التفعيل تعود كل الأسعار إلى نظام التسعير المختار أعلاه.</p>
+
+    <label>نسبة الربح العامة</label>
+    <input name="profit_margin" type="number" step="0.01" min="1" value="{{ profit_margin }}" required>
+    <p class="muted">مثال: 1.20 تعني إضافة 20% على تكلفة المزود. عند الحفظ سيتم تحديث أسعار كل الباقات حسب التكلفة.</p>
+
+    <label>طريقة عرض روابط الواجهة</label>
+    <select name="nav_mode">
+      <option value="menu" {% if selected_nav_mode=="menu" %}selected{% endif %}>زر قائمة منسدلة</option>
+      <option value="direct" {% if selected_nav_mode=="direct" %}selected{% endif %}>روابط مباشرة في الشريط</option>
+    </select>
+    <p class="muted">اختر روابط مباشرة إذا أردت أن تظهر: الرئيسية، طلباتي، سجل طلبات الرصيد، شحن المحفظة بدون زر القائمة.</p>
+
+    <label>تصميم الموقع</label>
+    <select name="site_theme">
+      <option value="theme-aurora" {% if selected_theme=="theme-aurora" %}selected{% endif %}>Aurora Gaming - عصري متدرج</option>
+      <option value="theme-minimal" {% if selected_theme=="theme-minimal" %}selected{% endif %}>Minimal Store - أبيض سريع</option>
+      <option value="theme-neon" {% if selected_theme=="theme-neon" %}selected{% endif %}>Neon Arcade - ألعاب نيون</option>
+      <option value="theme-lux" {% if selected_theme=="theme-lux" %}selected{% endif %}>Luxury Dark - داكن فاخر</option>
+    </select>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="show_groups_direct" value="1" {% if show_groups_direct_setting=="1" %}checked{% endif %} style="width:auto">
+      إظهار أقسام الألعاب مباشرة في الواجهة الرئيسية
+    </label>
+    <p class="muted">عند التفعيل ستظهر أقسام مثل: شدات / بطاقات مباشرة في الصفحة الرئيسية بدل الدخول إلى اللعبة أولًا.</p>
+
+    {# V66: homepage section toggles #}
+    <h2>أقسام الصفحة الرئيسية</h2>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="show_popular_bar" value="1" {% if show_popular_bar_setting=="1" %}checked{% endif %} style="width:auto">
+      إظهار شريط "الأكثر طلباً" أعلى شبكة الألعاب
+    </label>
+    <p class="muted">شريط أفقي قابل للسحب يعرض أبرز 8 ألعاب مميّزة. يظهر فقط إذا اخترت 4 ألعاب أو أكثر للعرض.</p>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="show_testimonials" value="1" {% if show_testimonials_setting=="1" %}checked{% endif %} style="width:auto">
+      إظهار قسم "آراء اللاعبين" (التعليقات) في الصفحة الرئيسية
+    </label>
+    <p class="muted">عند الإطفاء يختفي القسم بالكامل. عند التشغيل يمكنك تخصيص محتوى كل تعليق أدناه.</p>
+
+    <div style="margin:14px 0 22px;padding:14px;background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.2);border-radius:12px">
+      <h3 style="margin:0 0 10px;font-size:15px">محتوى تعليقات الصفحة الرئيسية</h3>
+      <p class="muted" style="margin:0 0 12px;font-size:12px">اترك أي حقل فارغًا لاستخدام النص الافتراضي. الحقول تخزَّن كنص عادي ويتم تنظيف أي وسوم HTML تلقائيًا.</p>
+      {% for i in [1, 2, 3] %}
+        <fieldset style="border:1px solid #2a2a3a;border-radius:10px;padding:10px 12px;margin:0 0 10px">
+          <legend style="padding:0 6px;font-size:13px;color:#94a3b8">التعليق {{ i }}</legend>
+          <label>اسم اللاعب</label>
+          <input name="testimonial_{{ i }}_name" maxlength="80"
+                 value="{{ {1: testimonial_1_name, 2: testimonial_2_name, 3: testimonial_3_name}[i] }}"
+                 placeholder="مثال: أحمد ع.">
+          <label>اللعبة</label>
+          <input name="testimonial_{{ i }}_game" maxlength="60"
+                 value="{{ {1: testimonial_1_game, 2: testimonial_2_game, 3: testimonial_3_game}[i] }}"
+                 placeholder="مثال: PUBG">
+          <label>نص التعليق</label>
+          <textarea name="testimonial_{{ i }}_text" maxlength="400" rows="3"
+                    placeholder="اكتب نص التعليق هنا (يدعم العربية والإنجليزية)">{{ {1: testimonial_1_text, 2: testimonial_2_text, 3: testimonial_3_text}[i] }}</textarea>
+        </fieldset>
+      {% endfor %}
+    </div>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="auto_refund_on_failure" value="1" {% if auto_refund_on_failure_setting=="1" %}checked{% endif %} style="width:auto">
+      إعادة الرصيد تلقائيًا عند فشل المزود (بدلًا من نقل الطلب لقائمة اليدوي)
+    </label>
+
+    <label style="display:flex;gap:10px;align-items:center;margin-top:10px">
+      <input type="checkbox" name="player_validation_api_enabled" value="1" {% if player_validation_api_enabled_setting=="1" %}checked{% endif %} style="width:auto">
+      تفعيل التحقق من اسم اللاعب عبر API (يستهلك استدعاءات لدى المورد)
+    </label>
+
+
+
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="manual_orders" value="1" {% if manual_orders=="1" %}checked{% endif %} style="width:auto">
+      جعل جميع طلبات الشراء يدوية
+    </label>
+
+    <!-- V67.1 PROVIDER SEPARATION -->
+    <hr style="border-color:rgba(255,255,255,.08);margin:16px 0">
+    <h3 style="margin:6px 0 10px">إعدادات الموردين</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">
+      حدّد المورد الأساسي. سيظهر علم مميّز بجانب كل لعبة وطلب لتمييزه عن المورد الثاني،
+      وفلتر صفحة الطلبات يبدأ بإظهاره فقط.
+    </p>
+
+    <label style="display:block;margin-bottom:6px;font-weight:700">المورد الأساسي</label>
+    <select name="primary_provider" style="width:100%;max-width:360px">
+      <option value="server2" {% if primary_provider_setting=="server2" %}selected{% endif %}>
+        🟢 Shop2Topup (سيرفر 2) — موصى به
+      </option>
+      <option value="server1" {% if primary_provider_setting=="server1" %}selected{% endif %}>
+        🔵 G2Bulk (سيرفر 1)
+      </option>
+    </select>
+
+    {# V72: تفعيل/إيقاف المورد 1 و المورد 2 (show_server1 / show_server2) أصبحا
+       يُداران من صفحة "الألعاب المعروضة في الواجهة" حصراً، حتى لا يحصل
+       تعارض بين النموذجين (نفس المفتاح كان يُحفظ من مكانين بأسماء مختلفة). #}
+    <div class="alert" style="margin-top:14px;background:rgba(124,58,237,.08);border:1px solid rgba(124,58,237,.25);border-radius:10px;padding:10px 14px;font-size:13px">
+      تفعيل/إيقاف <b>المورد 1</b> و <b>المورد 2</b> أصبح يُدار من
+      <a href="{{ url_for('admin_games') }}"><b>صفحة الألعاب</b></a>
+      (في أعلى كل عمود سيرفر يوجد زر "السيرفر مُفعَّل / مُوقَف").
+    </div>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="email_verification_enabled" value="1" {% if email_verification_enabled=="1" %}checked{% endif %} style="width:auto">
+      تفعيل تأكيد البريد الإلكتروني للمستخدمين الجدد
+    </label>
+
+    <label style="display:flex;gap:10px;align-items:center">
+      <input type="checkbox" name="hide_phone_on_register" value="1" {% if hide_phone_on_register=="1" %}checked{% endif %} style="width:auto">
+      إخفاء طلب رقم الهاتف عند التسجيل
+    </label>
+    {% if email_is_configured %}
+      <p class="muted">إعدادات SMTP موجودة في ملف .env.</p>
+    {% else %}
+      <div class="alert warning">تنبيه: تفعيل البريد يحتاج إعدادات SMTP في ملف .env أولًا.</div>
+    {% endif %}
+
+    <div style="margin:20px 0;padding:16px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.25);border-radius:12px">
+      <h3 style="margin:0 0 12px;font-size:16px">حالة إعدادات البريد الإلكتروني (SMTP)</h3>
+      {% if email_is_configured %}
+        <table style="width:100%;font-size:13px;color:#cbd5e1">
+          <tr><td style="padding:4px 0;color:#94a3b8">الخادم:</td><td><code>{{ smtp_server }}:{{ smtp_port }}</code></td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">المستخدم:</td><td><code>{{ smtp_username }}</code></td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">المُرسِل من:</td><td><code>{{ smtp_from }}</code></td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">TLS:</td><td>{{ "✓ مُفعّل" if smtp_use_tls else "✗ مُعطّل" }}</td></tr>
+          <tr><td style="padding:4px 0;color:#94a3b8">طول كلمة المرور:</td><td>{{ smtp_pw_len }} حرف</td></tr>
+        </table>
+        <p class="muted" style="margin:12px 0 8px;font-size:12px">
+          ملاحظة هامة لـ Gmail: يجب استخدام <b>App Password</b> (16 حرفًا بدون مسافات) وليس كلمة مرور الحساب.<br>
+          أنشئها من: <code>https://myaccount.google.com/apppasswords</code>
+        </p>
+      {% else %}
+        <p style="color:#fbbf24">إعدادات SMTP ناقصة في ملف <code>.env</code>. أضف القيم التالية:</p>
+        <pre style="background:#0f172a;padding:12px;border-radius:8px;font-size:12px;overflow-x:auto;color:#cbd5e1">MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=1
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-16-char-app-password
+MAIL_FROM=your-email@gmail.com</pre>
+      {% endif %}
+    </div>
+
+    <h2>وسائل التواصل الظاهرة للمستخدم</h2>
+    <label>رقم واتساب</label>
+    <input name="whatsapp_number" value="{{ whatsapp_number_setting or '' }}" placeholder="مثال: 963932607063 أو 12025550123">
+    <p class="muted">اكتب الرقم بدون علامة +. اتركه فارغًا لإخفاء زر واتساب.</p>
+
+    <label>اسم مستخدم تيليغرام</label>
+    <input name="telegram_username" value="{{ telegram_username_setting or '' }}" placeholder="مثال: TecnoGemsSupport">
+    <p class="muted">اكتب اليوزر بدون @. اتركه فارغًا لإخفاء زر تيليغرام.</p>
+
+    <button class="btn primary" type="submit" style="margin-top:18px;width:100%">حفظ</button>
+  </form>
+
+  {% if email_is_configured %}
+  <div style="margin-top:20px;padding:16px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.25);border-radius:12px">
+    <h3 style="margin:0 0 12px;font-size:16px">اختبار إرسال البريد</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 12px">
+      أرسل إيميل اختبار للتأكد من أن SMTP يعمل. سيتم الإرسال مباشرة (بدون طابور) لتظهر أي أخطاء فورًا.
+    </p>
+    <form method="post" action="{{ url_for('admin_test_email') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="email" name="to" placeholder="البريد المستلم (اتركه فارغًا لإرساله إليك)" style="flex:1;min-width:250px">
+      <button type="submit" class="btn primary">إرسال إيميل اختبار</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

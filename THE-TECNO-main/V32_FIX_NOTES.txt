@@ -1,0 +1,7 @@
+V32 fixes:
+- WhatsApp floating button visible again but compact.
+- Arabic remains default; refresh will not switch to English unless the user explicitly clicks EN.
+- /legacy redirects permanently to clean URLs.
+- Canonical and OG URLs use https://tecnogems.com and remove /legacy.
+- Package names now match selected language more consistently.
+Google snippets may take time to update after re-indexing.

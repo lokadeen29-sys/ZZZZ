@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="legal-page" dir="rtl" lang="ar">
+  <h1>{{ "Privacy Policy" if is_en else "سياسة الخصوصية" }}</h1>
+  <p class="legal-updated">{{ "Last updated: 2025" if is_en else "آخر تحديث: 2025" }}</p>
+
+  {% if is_en %}
+  <section>
+    <h2>1. Introduction</h2>
+    <p>TecnoGems ("we", "us", "our") respects your privacy. This policy explains what data we collect, why we collect it, how long we keep it, and your rights regarding your personal information.</p>
+  </section>
+
+  <section>
+    <h2>2. Data We Collect</h2>
+    <ul>
+      <li><strong>Account information:</strong> name, email address, phone number (optional), and encrypted password.</li>
+      <li><strong>Transaction data:</strong> order history, player IDs submitted for top-ups, deposit amounts, and payment proof images.</li>
+      <li><strong>Technical data:</strong> IP address, browser type, device information, and session cookies required for site functionality.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. Why We Collect Data</h2>
+    <ul>
+      <li>To create and manage your account.</li>
+      <li>To process game top-up orders and wallet deposits.</li>
+      <li>To communicate order status and important account notifications.</li>
+      <li>To prevent fraud, abuse, and unauthorized access.</li>
+      <li>To improve our services and user experience.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. Data Retention</h2>
+    <p>We retain your personal data for as long as your account is active. Transaction records are kept for a minimum of 2 years for legal and accounting purposes. If you delete your account, personal data is removed within 30 days, except where retention is required by law.</p>
+  </section>
+
+  <section>
+    <h2>5. Data Sharing</h2>
+    <p>We do not sell your personal data. We may share limited information with:</p>
+    <ul>
+      <li>Game top-up service providers (player ID only, to fulfill orders).</li>
+      <li>Payment processors (to verify transactions).</li>
+      <li>Law enforcement (only when legally required).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. Your Rights</h2>
+    <ul>
+      <li><strong>Access:</strong> You can view your data through your profile page.</li>
+      <li><strong>Export:</strong> You may request a copy of your personal data by contacting support.</li>
+      <li><strong>Deletion:</strong> You may request account deletion by contacting support. We will process your request within 30 days.</li>
+      <li><strong>Correction:</strong> You can update your information from your profile settings.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>7. Cookies</h2>
+    <p>We use essential cookies for session management, language preference, and security (CSRF protection). We do not use third-party tracking cookies.</p>
+  </section>
+
+  <section>
+    <h2>8. Security</h2>
+    <p>We use industry-standard security measures including encrypted passwords, HTTPS encryption, CSRF protection, and rate limiting to protect your data.</p>
+  </section>
+
+  <section>
+    <h2>9. Contact Us</h2>
+    <p>For privacy-related inquiries, please <a href="{{ url_for('contact') }}">contact us</a>.</p>
+  </section>
+
+  {% else %}
+
+  <section>
+    <h2>1. مقدمة</h2>
+    <p>نحن في TecnoGems ("نحن"، "لنا"، "موقعنا") نحترم خصوصيتك. توضح هذه السياسة ما هي البيانات التي نجمعها، ولماذا نجمعها، ومدة احتفاظنا بها، وحقوقك فيما يخص بياناتك الشخصية.</p>
+  </section>
+
+  <section>
+    <h2>2. البيانات التي نجمعها</h2>
+    <ul>
+      <li><strong>معلومات الحساب:</strong> الاسم، البريد الإلكتروني، رقم الهاتف (اختياري)، وكلمة المرور المشفّرة.</li>
+      <li><strong>بيانات المعاملات:</strong> سجل الطلبات، معرّفات اللاعب (Player ID) المُدخلة لشحن الألعاب، مبالغ الإيداع، وصور إثبات الدفع.</li>
+      <li><strong>بيانات تقنية:</strong> عنوان IP، نوع المتصفح، معلومات الجهاز، وملفات تعريف الارتباط (Cookies) اللازمة لعمل الموقع.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. لماذا نجمع البيانات</h2>
+    <ul>
+      <li>لإنشاء وإدارة حسابك.</li>
+      <li>لمعالجة طلبات شحن الألعاب وإيداعات المحفظة.</li>
+      <li>لإبلاغك بحالة الطلبات والإشعارات المهمة المتعلقة بحسابك.</li>
+      <li>لمنع الاحتيال وسوء الاستخدام والوصول غير المصرح به.</li>
+      <li>لتحسين خدماتنا وتجربة المستخدم.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. مدة الاحتفاظ بالبيانات</h2>
+    <p>نحتفظ ببياناتك الشخصية طالما أن حسابك نشط. يتم الاحتفاظ بسجلات المعاملات لمدة لا تقل عن سنتين لأغراض قانونية ومحاسبية. في حال حذف حسابك، تُزال بياناتك الشخصية خلال 30 يومًا، ما لم يكن الاحتفاظ بها مطلوبًا بموجب القانون.</p>
+  </section>
+
+  <section>
+    <h2>5. مشاركة البيانات</h2>
+    <p>نحن لا نبيع بياناتك الشخصية. قد نشارك معلومات محدودة مع:</p>
+    <ul>
+      <li>مزوّدي خدمات شحن الألعاب (معرّف اللاعب فقط، لتنفيذ الطلبات).</li>
+      <li>معالجي الدفع (للتحقق من المعاملات).</li>
+      <li>الجهات القانونية (فقط عند الطلب القانوني الرسمي).</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. حقوقك</h2>
+    <ul>
+      <li><strong>الوصول:</strong> يمكنك الاطلاع على بياناتك من خلال صفحة الملف الشخصي.</li>
+      <li><strong>التصدير:</strong> يمكنك طلب نسخة من بياناتك الشخصية عبر التواصل مع الدعم.</li>
+      <li><strong>الحذف:</strong> يمكنك طلب حذف حسابك عبر التواصل مع الدعم. سنعالج طلبك خلال 30 يومًا.</li>
+      <li><strong>التصحيح:</strong> يمكنك تحديث معلوماتك من إعدادات ملفك الشخصي.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>7. ملفات تعريف الارتباط (Cookies)</h2>
+    <p>نستخدم ملفات تعريف ارتباط أساسية لإدارة الجلسات، وتفضيل اللغة، والحماية (CSRF). لا نستخدم ملفات تعريف ارتباط لتتبع طرف ثالث.</p>
+  </section>
+
+  <section>
+    <h2>8. الأمان</h2>
+    <p>نستخدم إجراءات أمان معيارية تشمل تشفير كلمات المرور، تشفير HTTPS، حماية CSRF، وتحديد معدل الطلبات لحماية بياناتك.</p>
+  </section>
+
+  <section>
+    <h2>9. تواصل معنا</h2>
+    <p>للاستفسارات المتعلقة بالخصوصية، يرجى <a href="{{ url_for('contact') }}">التواصل معنا</a>.</p>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

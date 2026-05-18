@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section style="padding:34px 0">
+  <h1>طرق الدفع</h1>
+  <div class="grid two">
+    {% for m in methods %}
+      <div class="card">
+        <h2>{{ m.emoji }} {{ m.name }}</h2>
+        <p><span class="status {{ 'completed' if m.active else 'rejected' }}">{{ 'مفعلة' if m.active else 'معطلة' }}</span> <span class="badge">{{ "ليرة سورية" if m.currency=="SYP" else "دولار" }}</span></p>
+        <p class="muted">العنوان / الرقم</p>
+        <p style="white-space:pre-wrap">{{ m.address }}</p>
+        <a class="btn primary" href="{{ url_for('admin_payment_method_edit', method_id=m.id) }}">تعديل</a>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
