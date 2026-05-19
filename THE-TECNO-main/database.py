@@ -1724,10 +1724,33 @@ def can_download_proof(user_id: int, is_admin: bool, filename: str) -> bool:
 
 
 def create_deposit(user_id, amount, method_id, proof, amount_usd=None, proof_filename=None):
+    """Create a pending deposit for the given user.
+
+    V72 / session 3 / PR #4: rewritten with SQLAlchemy ORM. The
+    behavioural contract is preserved exactly:
+
+      * Returns ``None`` when the payment method id is unknown.
+      * Returns ``(deposit_id, deposit_code)`` for both the freshly
+        inserted row AND the V69 dedup short-circuit (idempotent reply).
+      * V69 dedup window: a positive-amount, same-method, same-user,
+        ``status='pending'`` deposit submitted within the last 60s
+        is returned as-is instead of inserting a duplicate.
+      * V49-HOTFIX: ``amount_usd`` is ALWAYS recomputed server-side from
+        ``amount`` + the method's currency + the live SYP rate. The
+        ``amount_usd`` keyword argument from the caller is ignored
+        (kept for signature compatibility).
+      * ``deposit_code`` uses ``secrets.token_urlsafe(10)`` (V50 CA).
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Deposit
+    from app.db.session import get_session
+
     method = get_payment_method(method_id)
     if not method:
         return None
     currency = method.get("currency", "USD")
+
     # V69: server-side dedup. Prevents the "double-click / lost-network /
     # back-button-resubmit" pattern where the same user creates two
     # identical pending deposits within seconds, which then both have to
@@ -1741,26 +1764,24 @@ def create_deposit(user_id, amount, method_id, proof, amount_usd=None, proof_fil
     except Exception:
         _amount_check = 0.0
     if _amount_check > 0:
-        with db_conn() as conn:
-            row = conn.execute(
-                """
-                SELECT id, deposit_code FROM deposits
-                WHERE user_id=?
-                  AND method=?
-                  AND status='pending'
-                  AND ABS(amount - ?) < 0.005
-                  AND created_at >= ?
-                ORDER BY id DESC LIMIT 1
-                """,
-                (
-                    int(user_id),
-                    method["name"],
-                    _amount_check,
-                    int(time.time()) - 60,
-                ),
-            ).fetchone()
-            if row:
-                return row["id"], row["deposit_code"]
+        cutoff = int(time.time()) - 60
+        with get_session() as s:
+            existing = (
+                s.query(Deposit)
+                .filter(
+                    Deposit.user_id == int(user_id),
+                    Deposit.method == method["name"],
+                    Deposit.status == "pending",
+                    func.abs(Deposit.amount - _amount_check) < 0.005,
+                    Deposit.created_at >= cutoff,
+                )
+                .order_by(Deposit.id.desc())
+                .limit(1)
+                .one_or_none()
+            )
+            if existing is not None:
+                return existing.id, existing.deposit_code
+
     # V49-HOTFIX (defense in depth): always recompute amount_usd server-side
     # from the amount + method currency + current rate, regardless of what the
     # caller passed. This guarantees that:
@@ -1782,98 +1803,183 @@ def create_deposit(user_id, amount, method_id, proof, amount_usd=None, proof_fil
         amount_usd = round(_amt / _rate_val, 4) if _rate_val > 0 else 0.0
     else:
         amount_usd = round(_amt, 4)
+
     now = int(time.time())
     # V50 SECURITY (CA): same predictability issue as order_code. Use a
     # random token so deposit codes cannot be enumerated by attackers.
     code = f"DEP{secrets.token_urlsafe(10)}"
-    with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO deposits (deposit_code,user_id,amount,method,proof,status,created_at,currency,amount_usd,proof_filename)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-        """, (code, user_id, amount, method["name"], proof, "pending", now, currency, amount_usd, proof_filename))
-        conn.commit()
-        deposit_id = cur.lastrowid
-    return deposit_id, code
+
+    with get_session() as s:
+        dep = Deposit(
+            deposit_code=code,
+            user_id=user_id,
+            amount=amount,
+            method=method["name"],
+            proof=proof,
+            status="pending",
+            created_at=now,
+            currency=currency,
+            amount_usd=amount_usd,
+            proof_filename=proof_filename,
+        )
+        s.add(dep)
+        s.commit()
+        return dep.id, code
 
 
 def list_deposits_for_user(user_id):
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT *
-            FROM deposits
-            WHERE user_id=?
-            ORDER BY id DESC
-            LIMIT 200
-        """, (int(user_id),)).fetchall()]
+    """Return up to 200 most-recent deposits for a user, newest first.
+
+    V72 / session 3 / PR #4: rewritten with SQLAlchemy ORM. Returns a
+    list of plain ``dict``s with every column from the ``deposits``
+    table (keys match the legacy ``sqlite3.Row → dict`` shape).
+    """
+    from app.db.models import Deposit
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(Deposit)
+            .filter(Deposit.user_id == int(user_id))
+            .order_by(Deposit.id.desc())
+            .limit(200)
+            .all()
+        )
+        return rows_to_dicts(rows)
 
 
 def list_deposits(status=None):
-    with db_conn() as conn:
+    """Return deposits for the admin queue, newest first, with the
+    submitting user's name + email joined in.
+
+    V72 / session 3 / PR #4: rewritten with SQLAlchemy ORM. Two modes,
+    matching the legacy SQL exactly:
+
+      * ``status=None`` — up to 200 most-recent deposits across every
+        status (admin dashboard preview).
+      * ``status="pending"`` (or any value) — EVERY deposit in that
+        status, no limit (admin processing queue).
+
+    Each row is a plain ``dict`` containing the full ``deposits`` column
+    set PLUS the joined ``user_name`` and ``user_email`` columns. The
+    legacy SQL produced these via ``SELECT d.*, u.name user_name,
+    u.email user_email FROM deposits d JOIN users u ON u.id=d.user_id``
+    so admin templates iterate ``r["user_name"]`` directly.
+    """
+    from app.db.models import Deposit, User
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        q = s.query(Deposit, User.name, User.email).join(
+            User, User.id == Deposit.user_id
+        )
         if status:
-            return [dict(r) for r in conn.execute("""
-                SELECT d.*, u.name user_name, u.email user_email
-                FROM deposits d JOIN users u ON u.id=d.user_id
-                WHERE d.status=?
-                ORDER BY d.id DESC
-            """, (status,)).fetchall()]
+            q = q.filter(Deposit.status == status).order_by(Deposit.id.desc())
         else:
-            return [dict(r) for r in conn.execute("""
-                SELECT d.*, u.name user_name, u.email user_email
-                FROM deposits d JOIN users u ON u.id=d.user_id
-                ORDER BY d.id DESC LIMIT 200
-            """).fetchall()]
+            q = q.order_by(Deposit.id.desc()).limit(200)
+
+        out = []
+        for dep, user_name, user_email in q.all():
+            d = row_to_dict(dep)
+            d["user_name"] = user_name
+            d["user_email"] = user_email
+            out.append(d)
+        return out
 
 
 def get_deposit(deposit_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM deposits WHERE id=?", (deposit_id,)).fetchone()
-        return dict(row) if row else None
+    """Look up a single deposit by primary key.
+
+    V72 / session 3 / PR #4: rewritten with SQLAlchemy ORM. Returns a
+    plain ``dict`` (full column set) or ``None``. Coerces ``deposit_id``
+    to ``int`` so URL-derived strings keep working (mirrors the legacy
+    SQLite implicit cast).
+    """
+    from app.db.models import Deposit
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    try:
+        did = int(deposit_id)
+    except (TypeError, ValueError):
+        return None
+    with get_session() as s:
+        row = s.get(Deposit, did)
+        return row_to_dict(row) if row is not None else None
 
 
 def update_deposit(deposit_id, status):
-    with db_conn() as conn:
+    """Atomically transition a pending deposit and credit USD on approval.
+
+    V72 / session 3 / PR #4: rewritten with SQLAlchemy ORM. The
+    behavioural contract is preserved exactly:
+
+      * Returns ``False`` when the deposit does not exist OR is not in
+        ``status='pending'`` (i.e. the legacy "تمت المعالجة مسبقاً"
+        idempotency guard — admins double-clicking Approve/Reject must
+        not credit the user twice).
+      * Returns ``True`` on success.
+      * On approval, credits the user's ``balance`` with the
+        precomputed ``amount_usd`` if available (V49-HOTFIX: this is
+        the rate locked in at submission time). Falls back to
+        ``_amount_to_usd(amount, currency)`` for legacy deposits where
+        ``amount_usd`` is missing or zero.
+      * Wraps everything in a single transaction. ``BEGIN IMMEDIATE``
+        was a SQLite-only directive; under SQLAlchemy this becomes the
+        default transactional behaviour of ``Session`` + ``commit()``.
+        The READ-MODIFY-WRITE order is unchanged so the
+        "approved-twice" race is still avoided on Postgres.
+      * Re-raises on any exception (with rollback) — never swallows.
+    """
+    from app.db.models import Deposit, User
+    from app.db.session import get_session
+
+    with get_session() as s:
         try:
-            conn.execute("BEGIN IMMEDIATE")
-            cur = conn.cursor()
-            cur.execute(
-                "UPDATE deposits SET status=? WHERE id=? AND status='pending'",
-                (status, deposit_id)
-            )
-            if cur.rowcount == 0:
-                conn.rollback()
-                return False  # تمت المعالجة مسبقاً
+            dep = s.get(Deposit, deposit_id)
+            # Same idempotency guard as the legacy
+            #     UPDATE deposits SET status=? WHERE id=? AND status='pending'
+            # — non-existent OR already-processed deposits return False.
+            if dep is None or dep.status != "pending":
+                return False
+
+            dep.status = status
+
             if status == "approved":
-                dep = cur.execute("SELECT * FROM deposits WHERE id=?", (deposit_id,)).fetchone()
-                # V49-HOTFIX: `dep` is a sqlite3.Row which has NO .get() method —
-                # the previous call `dep.get("currency", "USD")` raised AttributeError
-                # and caused a 500 error every time an admin clicked Approve.
-                # Also, we now prefer the pre-computed `amount_usd` column (filled
-                # by create_deposit at submission time) over re-converting `amount`.
-                # This way approval uses the exact rate that was shown to the user
-                # when they submitted the deposit — not today's rate if it changed.
-                dep_keys = dep.keys()
+                # V49-HOTFIX: prefer the pre-computed `amount_usd` column
+                # (filled by create_deposit at submission time) over
+                # re-converting `amount`. This way approval uses the
+                # exact rate that was shown to the user when they
+                # submitted the deposit — not today's rate if it changed.
                 amount_usd_stored = None
-                if "amount_usd" in dep_keys:
-                    try:
-                        v = dep["amount_usd"]
-                        if v is not None and float(v) > 0:
-                            amount_usd_stored = float(v)
-                    except Exception:
-                        amount_usd_stored = None
+                try:
+                    v = dep.amount_usd
+                    if v is not None and float(v) > 0:
+                        amount_usd_stored = float(v)
+                except Exception:
+                    amount_usd_stored = None
+
                 if amount_usd_stored is not None:
                     amount_to_add = round(amount_usd_stored, 4)
                 else:
-                    # Legacy deposits (amount_usd missing/0): fall back to converting
-                    # the paid amount using the deposit's currency column.
-                    dep_currency = dep["currency"] if "currency" in dep_keys else "USD"
-                    amount_to_add = _amount_to_usd(dep["amount"], dep_currency or "USD")
-                cur.execute("UPDATE users SET balance = balance + ? WHERE id=?",
-                             (amount_to_add, dep["user_id"]))
-            conn.commit()
+                    # Legacy deposits (amount_usd missing/0): fall back to
+                    # converting the paid amount using the deposit's
+                    # currency column.
+                    amount_to_add = _amount_to_usd(
+                        dep.amount, dep.currency or "USD"
+                    )
+
+                user = s.get(User, dep.user_id)
+                if user is not None:
+                    # Mirror the old `balance = balance + ?` semantics.
+                    user.balance = (user.balance or 0) + amount_to_add
+
+            s.commit()
             return True
         except Exception:
-            conn.rollback()
+            s.rollback()
             raise
 
 
