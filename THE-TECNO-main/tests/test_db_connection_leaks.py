@@ -40,11 +40,29 @@ def test_no_direct_connect_outside_db_conn():
 
 
 def test_db_conn_usage_count():
-    """Sanity check: db_conn() should be used extensively (>70 times)."""
+    """Sanity check: db_conn() should still be used extensively.
+
+    V72 / session 3: as the Postgres migration converts functions to
+    SQLAlchemy ORM, the count of ``with db_conn()`` blocks gradually
+    drops. This sentinel keeps CI honest — if it falls below the
+    floor someone has rewritten too much in one PR (or accidentally
+    deleted ``database.py``). The floor is reduced in every PR by
+    roughly the number of functions migrated:
+
+      * end of session 2:  ~90 (raw SQL everywhere)
+      * after PR #1:        ~82
+      * after PR #2:        ~75
+      * after PR #3:        ~71
+      * after PR #4:        ~67
+      * after PR #5:        ~64  ← current (3 critical helpers migrated)
+
+    We assert >=50 to give the remaining waves head-room without
+    having to bump this sentinel on every PR.
+    """
     db_file = Path(__file__).resolve().parent.parent / "database.py"
     content = db_file.read_text(encoding="utf-8")
     count = content.count("with db_conn()")
-    assert count >= 70, (
-        f"Expected at least 70 uses of `with db_conn()`, found {count}. "
-        "New DB functions must use the context manager."
+    assert count >= 50, (
+        f"Expected at least 50 uses of `with db_conn()`, found {count}. "
+        "If this is intentional (deeper Postgres migration), update the floor."
     )
