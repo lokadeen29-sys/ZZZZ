@@ -13,7 +13,7 @@
 | 0 | التحضير + إنشاء الخطة | ✅ مكتملة | 2026-05-18 |
 | 1 | إضافة SQLAlchemy + Models | ✅ مكتملة | 2026-05-18 |
 | 2 | تهيئة Alembic + baseline | ✅ مكتملة | 2026-05-18 |
-| 3 | إعادة كتابة database.py بـ ORM | ⏳ قيد التنفيذ (PRs #1, #2, #3 ✅ مدموجة، PR #4 قيد المراجعة) | - |
+| 3 | إعادة كتابة database.py بـ ORM | ⏳ قيد التنفيذ (PRs #1, #2, #3, #4 ✅ مدموجة، PR #5 جاهز للمراجعة) | - |
 | 4 | كتابة سكربت نقل البيانات | ⏸️ لم تبدأ | - |
 | 5 | تثبيت Postgres على Hetzner | ⏸️ لم تبدأ | - |
 | 6 | تنفيذ النقل + الاختبار | ⏸️ لم تبدأ | - |
@@ -360,7 +360,7 @@ cd /root/project
 
 ## 🔄 الجلسة 3: تحويل database.py لاستخدام ORM
 
-**الحالة:** قيد التنفيذ (PRs #1, #2, #3 ✅ مدموجة · PR #4 جاهز للمراجعة)
+**الحالة:** قيد التنفيذ (PRs #1, #2, #3, #4 ✅ مدموجة · PR #5 جاهز للمراجعة)
 
 **الهدف:** كل دوال `database.py` (~80 دالة) تستخدم SQLAlchemy داخلياً، لكن نفس الـ signatures (لا يكسر شيء).
 
@@ -389,8 +389,8 @@ def get_user(user_id):
 - **PR #1:** ✅ **مدموج** — الدوال البسيطة (`get_setting`, `set_setting`, `wishlist_*`, `list_payment_methods`, `get_payment_method`, `update_payment_method`)
 - **PR #2:** ✅ **مدموج** — دوال القراءة (`get_user`, `get_game`, `list_games`, `get_product`, `list_products`)
 - **PR #3:** ✅ **مدموج** — دوال الطلبات (`list_orders`, `list_user_orders`, `get_order`, `update_order`)
-- **PR #4:** ✅ **جاهز للمراجعة** — دوال الإيداع (`create_deposit`, `list_deposits_for_user`, `list_deposits`, `get_deposit`, `update_deposit`)
-- **PR #5:** الدوال الحرجة (`create_order`, `change_balance`, `set_user_balance`)
+- **PR #4:** ✅ **مدموج** — دوال الإيداع (`create_deposit`, `list_deposits_for_user`, `list_deposits`, `get_deposit`, `update_deposit`)
+- **PR #5:** ✅ **جاهز للمراجعة** — الدوال الحرجة (`set_user_balance`, `change_balance`, `create_order`)
 - **PR #6:** الباقي (audit_log, admin functions)
 
 ### ✅ ما تم إنجازه في PR #1 (الموجة الأولى):
@@ -640,6 +640,113 @@ cd /root/project
 ### 🔄 Rollback إذا فشل أي شيء:
 - أعد deploy للنسخة السابقة من `deploy.sh` (يحفظ نسخة احتياطية تلقائياً).
 - لم يحدث أي تغيير في DB schema، فلا حاجة لـ DB rollback.
+
+---
+
+### ✅ ما تم إنجازه في PR #5 (الموجة الخامسة — الدوال الحرجة):
+
+> ⚠️ **هذه أخطر موجة في الجلسة 3** — لأنها تمسّ الرصيد مباشرة. كل دالة محوّلة كانت معلَّمة بـ V47 (atomic balance check) أو V50 (random order_code) في hotfix سابق، ويجب الحفاظ على كل ضمانات السلامة بنفس القوّة.
+
+#### 1. تحويل 3 دوال حرجة إلى ORM
+في `database.py`:
+
+- `set_user_balance(user_id, amount)` — overwrite مطلق:
+  - coercion كالـ legacy: `int(user_id)` + `float(amount or 0)` (لا يكسر `None`/`""`/string IDs).
+  - missing user → no-op صامت (`UPDATE` لا يطابق صفوف؛ rowcount لا يُفحص — مطابق للـ legacy).
+  - استبدال `with db_conn(): conn.execute(UPDATE)` بـ `s.execute(update(User).where(...).values(...))`.
+
+- `change_balance(user_id, amount)` — delta معدّل (يقبل قيم سالبة):
+  - يستخدم `User.balance + amount` على مستوى SQL (ليس Python read-then-write) — concurrent callers لا يتسابقون لأن الـ UPDATE ذرّي على مستوى الصف في كل من SQLite و Postgres.
+  - **لا clamping عند الصفر**: السلوك الـ legacy يسمح بأرصدة سالبة لو الـ caller أخطأ — V47 floor مسؤولية `create_order` فقط.
+
+- `create_order(user, product, game, player_id)` — **أحرج دالة في PR #5**:
+  - **V47 atomic check محفوظ**: استبدال `BEGIN IMMEDIATE` + `UPDATE ... WHERE balance >= ?` بـ:
+    ```python
+    update(User)
+        .where(User.id == user["id"], User.balance >= final_price)
+        .values(balance=User.balance - final_price)
+    ```
+    التحقّق من `result.rowcount == 0` يكشف رصيداً غير كافٍ → rollback + raise `InsufficientBalance`. على Postgres، الـ row-level lock الذي يحوزه الـ UPDATE يمنع تعارض sub-second، تماماً كما كان `BEGIN IMMEDIATE` يفعل على SQLite.
+  - **V50 (C2) محفوظ**: `order_code = "ORD" + secrets.token_urlsafe(10)` — لا عودة للنمط المتنبَّأ `ORD<ts><uid>`.
+  - **product_label snapshot محفوظ**: استخدام `display_name` المعرَّب أو fallback إلى `name`، مع `translate_product_name` — يُجمَّد عند الإنشاء حتى لو أُعيدت تسمية المنتج لاحقاً.
+  - **TOCTOU محمي**: `final_price` يُحسَب مرّة واحدة قبل الـ tx ويُستخدم لكل من الخصم والـ INSERT.
+  - **rollback + re-raise** على أي exception، مع تمييز `InsufficientBalance` (raise بدون wrapping) عن أي خطأ آخر.
+  - استخدام `s.add(order)` ثم `s.flush()` لاسترجاع `order.id` قبل الـ commit (يقابل `cur.lastrowid` في الـ legacy).
+
+#### 2. اختبارات جديدة `tests/test_database_orm_pr5.py`
+~24 اختبار pytest يفحص:
+
+- **`set_user_balance`**: قيمة دقيقة، overwrite (ليس additive)، string IDs، `None`/`""` → 0.0، missing user no-op صامت.
+- **`change_balance`**: credit/debit، **لا clamping عند الصفر**، delta=0 no-op، missing user no-op.
+- **`create_order` happy path**: `(int_id, "ORD..." str)`، خصم بالمقدار الدقيق، كل أعمدة `orders` legacy موجودة، `display_name` يصبح `product_name`، fallback إلى `name`.
+- **`create_order` V47 floor**: `InsufficientBalance` على رصيد ناقص، الرصيد لم يُلمَس عند الفشل، **لم يُدخَل صف**، حدّ `balance == price` ينجح، 0/0 ينجح.
+- **`create_order` V50 randomness**: 20 طلب → 20 كود فريد، الكود **ليس** decimal (يكشف العودة لنمط `ORD<ts><uid>`).
+- **`create_order` error path**: مستخدم غير موجود → `InsufficientBalance`، فشل INSERT (UNIQUE collision عبر monkeypatch لـ `secrets.token_urlsafe`) → exception ينتشر، **الخصم يُسترَدّ** على فشل INSERT (الأخطر).
+
+#### 3. تحديث `tests/test_db_connection_leaks.py`
+عداد `with db_conn()` في `database.py` انخفض من 67 (بعد PR #4) إلى **64** بعد PR #5. الـ floor كان `>=70` (متضارب مع الـ count الفعلي قبل PR #5 أيضاً — كان CI أحمر منذ PR #1 صامتاً). تحديثها إلى `>=50` لتبقى صحيحة لباقي الموجات (PR #6 سيُنزل العدد إلى ~30-40).
+
+### 📍 المخرجات (الملفات المعدّلة + الجديدة في PR #5):
+
+| الملف | تغيير | الوصف |
+|------|-------|-------|
+| `database.py` | معدّل (3 دوال) | استبدال raw SQL بـ ORM داخلياً + V47 atomic check عبر `update().where()` |
+| `tests/test_database_orm_pr5.py` | جديد (~430 سطر) | ~24 اختبار parity للدوال الحرجة |
+| `tests/test_db_connection_leaks.py` | معدّل (3 سطور) | floor العداد 70 → 50 لاستيعاب الموجات القادمة |
+
+### 🛡️ ضمانات السلامة (PR #5):
+- ✅ كل التواقيع وقيم الإرجاع كما هي (`api_bp.py` + `public_bp.py` + `admin_bp.py` + `tasks.py` + tests فلم تُلمس).
+- ✅ V47 atomic balance check عبر `update().where(User.balance >= final_price)` + فحص `rowcount` — race-safe على Postgres كما كان على SQLite.
+- ✅ V50 random `order_code` — لا عودة للنمط المتنبَّأ.
+- ✅ `InsufficientBalance` يُرفع كما كان (نفس الرسالة `"رصيدك غير كافٍ"`).
+- ✅ rollback عند أي فشل INSERT — الرصيد لا يُخصَم لطلب لم يُنشأ.
+- ✅ `with db_conn()` ما زال مستخدماً 64 مرّة في باقي الدوال — `test_db_conn_usage_count` ما زال أخضر (>= 50).
+- ✅ النماذج تتطابق مع الـ schema الحقيقية (تم التحقّق في الجلستين 1+2).
+- ✅ الـ syntax تم التحقّق منه عبر `python -m py_compile`. تشغيل pytest الفعلي يتم على CI (الـ sandbox مغلق الشبكة).
+
+### 🚀 ما يفعله المستخدم بعد PR #5:
+
+#### الخطوة 1: راجع الـ PR على GitHub (`feat/postgres-migration-session3-pr5`)
+انظر diff في `database.py`؛ كل دالة معدّلة لها docstring `V72 / session 3 / PR #5` أعلى التعريف.
+
+#### الخطوة 2: deploy كالعادة (نفس الإجراء)
+```bash
+scp ZZZZ-main.zip root@46.224.87.50:/root/
+ssh root@46.224.87.50
+/root/deploy.sh /root/tecnogems_latest.zip
+```
+
+#### الخطوة 3: ⚠️ اختبار حرج — اشتري شيئاً من حساب اختباري
+هذه أهم خطوة في الجلسة 3 كلها. اختبر السيناريوهات التالية:
+
+- **شراء عادي**: من حساب فيه رصيد كافٍ، اشترِ منتجاً → الرصيد يُخصَم بالمبلغ الصحيح، الطلب يظهر في `/orders`.
+- **شراء برصيد غير كافٍ**: من حساب رصيده < سعر المنتج → "رصيدك غير كافٍ" + الرصيد لم يُلمَس + لا طلب جديد.
+- **رصيد بالضبط = السعر**: حساب رصيده 5$ يشتري منتجاً 5$ → ينجح، الرصيد = 0.
+- **double-click على Buy**: اضغط "اشتري" مرتين بسرعة → طلب واحد فقط يُنشأ (الـ rate limit 20/min في `public_bp.py` يحمي إضافياً).
+- **`order_code` فريد**: لاحِظ أن كل طلب له كود مختلف يبدأ بـ `ORD` ثم 13+ حرف عشوائي.
+
+#### الخطوة 4: اختبار رصيد الأدمن
+- لوحة `/admin/user/<id>` → عدّل الرصيد → القيمة تُحفَظ بدقة.
+- حاول كتابة قيمة فارغة → يُحفظ 0.0.
+
+#### الخطوة 5: شغّل الاختبارات (اختياري)
+```bash
+cd /root/project
+.venv/bin/pytest tests/test_database_orm_pr5.py -v
+```
+
+### ✅ معايير النجاح لـ PR #5:
+- [ ] الـ CI يمرّ على branch
+- [ ] الموقع يعمل بشكل طبيعي بعد deploy
+- [ ] الشراء يخصم الرصيد بالضبط (لا فرق ملحوظ)
+- [ ] رصيد ناقص يُرفض بنفس الرسالة العربية
+- [ ] لا حالة "تم الخصم بدون طلب" أو "تم إنشاء طلب بدون خصم" — الـ rollback يعمل
+- [ ] أكواد الطلبات فريدة وعشوائية
+
+### 🔄 Rollback إذا فشل أي شيء:
+- أعد deploy للنسخة السابقة من `deploy.sh` (يحفظ نسخة احتياطية تلقائياً).
+- لم يحدث أي تغيير في DB schema، فلا حاجة لـ DB rollback.
+- **مهم**: لو لاحظت أي فرق في الرصيد بين قبل وبعد، تواصل فوراً قبل الاستمرار في PR #6.
 
 ---
 - [ ] الموقع يعمل تماماً كما كان (لا تغيير في السلوك)
@@ -906,7 +1013,7 @@ Kiro سيقرأ ملف `MIGRATION_PLAN.md`، يفحص حالة كل جلسة، �
 ---
 
 **تاريخ إنشاء الخطة:** 2026-05-18  
-**آخر تحديث:** 2026-05-19 (الجلسة 3 / PR #4 — تحويل 5 دوال إيداع إلى ORM)  
+**آخر تحديث:** 2026-05-19 (الجلسة 3 / PR #5 — تحويل الدوال الحرجة `set_user_balance`, `change_balance`, `create_order` إلى ORM)  
 **المسؤول:** Kiro + المستخدم  
 
 > 💬 لأي استفسار: ابدأ محادثة جديدة وقل _"عندي سؤال عن MIGRATION_PLAN.md"_

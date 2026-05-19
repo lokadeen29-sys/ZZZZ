@@ -808,15 +808,84 @@ def confirm_pending_email_change(token):
 
 
 def set_user_balance(user_id, amount):
-    with db_conn() as conn:
-        conn.execute("UPDATE users SET balance = ? WHERE id=?", (float(amount or 0), int(user_id)))
-        conn.commit()
+    """Overwrite a user's balance with an absolute value.
+
+    V72 / session 3 / PR #5: rewritten with SQLAlchemy ORM. The
+    behavioural contract is preserved exactly:
+
+      * ``user_id`` is coerced to ``int`` (mirrors the legacy SQLite
+        implicit cast — string IDs like ``"5"`` still work).
+      * ``amount`` is coerced via ``float(amount or 0)``; ``None`` and
+        ``0`` and ``""`` all collapse to ``0.0`` (legacy did the same).
+      * No-op for missing users (the UPDATE matches zero rows). The
+        legacy code also silently no-op'd in that case — there is no
+        rowcount check to preserve.
+      * Wraps the UPDATE in a single transaction (implicit ``BEGIN``
+        on the SQLAlchemy session). Re-raises on exception with
+        rollback.
+
+    Used by:
+      * Admin balance edits (``app/routes/admin_bp.py`` —
+        ``/admin/user/<id>/balance``).
+      * Test fixtures (``tests/conftest.py.make_user``).
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == int(user_id))
+                .values(balance=float(amount or 0))
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def change_balance(user_id, amount):
-    with db_conn() as conn:
-        conn.execute("UPDATE users SET balance = balance + ? WHERE id=?", (amount, user_id))
-        conn.commit()
+    """Apply a delta to a user's balance (positive = credit, negative =
+    debit).
+
+    V72 / session 3 / PR #5: rewritten with SQLAlchemy ORM. The
+    behavioural contract is preserved exactly:
+
+      * Performs ``balance = balance + ?`` directly on the row, NOT a
+        Python read-then-write — concurrent callers on the same user
+        cannot race against each other (each UPDATE is atomic at the
+        row level on both SQLite and Postgres).
+      * No clamping: a negative ``amount`` larger than the current
+        balance produces a negative balance, just like the legacy SQL.
+        Callers that need the V47 atomic floor (``balance >= price``)
+        must use :func:`create_order`, not this helper.
+      * No coercion of ``user_id`` (legacy passed it through to
+        SQLite, which accepted string ints; SQLAlchemy + most drivers
+        also accept that).
+
+    Used by:
+      * ``audit.py`` reversal helpers.
+      * ``tasks.py`` order-state callbacks.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(balance=User.balance + amount)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def upsert_game(provider, game_key, name, emoji="🎮", active=1):
@@ -1386,47 +1455,108 @@ def _product_price_usd(product):
 def create_order(user, product, game, player_id):
     """Create an order and atomically deduct balance.
 
-    V47: The balance check and deduction are now inside a single BEGIN IMMEDIATE
-    transaction so two concurrent requests cannot both pass the balance check and
-    double-spend.  The UPDATE only touches rows where balance >= price, and we
-    verify rowcount afterwards — if it is 0 the user had insufficient funds and
-    we roll back + raise InsufficientBalance.
+    V72 / session 3 / PR #5: rewritten with SQLAlchemy ORM. Every
+    behavioural quirk of the V47/V50 implementation is preserved.
+
+    V47 contract — atomic balance check:
+      The legacy code wrapped a ``BEGIN IMMEDIATE`` around an
+      ``UPDATE users SET balance = balance - ? WHERE id = ? AND
+      balance >= ?`` so that two concurrent requests could not both
+      pass the balance check and double-spend. We reproduce this with
+      a single SQL ``UPDATE`` (via SQLAlchemy ``update()``) that
+      filters on ``balance >= price``. If the result's ``rowcount`` is
+      zero, the user had insufficient funds and we raise
+      :exc:`InsufficientBalance`. The order INSERT only runs when the
+      deduction succeeded.
+
+      On Postgres this is race-safe because the row-level lock
+      acquired by the UPDATE blocks any concurrent UPDATE on the same
+      row, and READ COMMITTED ensures the ``WHERE balance >= price``
+      sees the post-lock value. On SQLite the implicit BEGIN +
+      single-writer model gives the same guarantee.
+
+    V50 (C2) contract — unpredictable order codes:
+      ``order_code = "ORD" + secrets.token_urlsafe(10)`` — must NOT
+      revert to the predictable ``f"ORD{now}{user_id}"`` pattern.
+      Collision risk at a 80-bit keyspace is negligible, and
+      ``orders.order_code`` is UNIQUE so any (theoretical) collision
+      surfaces as a constraint violation (re-raised, no silent retry
+      — same as legacy).
+
+    Other behaviour preserved:
+      * ``final_price`` is computed once via ``_product_price_usd``
+        and used for BOTH the deduction AND the inserted ``price`` —
+        prevents a TOCTOU between price calculation and write.
+      * ``product_label`` is the translated ``display_name`` /
+        ``name`` (Arabic-localised) at order creation time. This
+        snapshots the label so admin queues and user history pages
+        keep showing the price/label that was charged, even if the
+        product is renamed later.
+      * ``InsufficientBalance`` is re-raised explicitly (not
+        swallowed by the generic ``except``).
+      * Any other exception triggers ``rollback()`` and re-raises —
+        never swallowed.
+
+    Returns:
+        ``(order_id, order_code)``.
     """
+    from sqlalchemy import update
+
+    from app.db.models import Order, User
+    from app.db.session import get_session
+
     now = int(time.time())
-    # V50 SECURITY (C2): order_code was previously f"ORD{now}{user_id}" which
-    # is trivially predictable — an attacker who knows a user_id and the rough
-    # time of order creation can guess order codes and probe any endpoint that
-    # treats the code as a bearer credential. Use a cryptographically random
-    # token instead. Collision risk at 10 bytes (~13 chars) is negligible
-    # (2^80 keyspace) and orders.order_code has a UNIQUE constraint.
+    # V50 SECURITY (C2): cryptographically random order code.
     order_code = f"ORD{secrets.token_urlsafe(10)}"
     final_price = _product_price_usd(product)
-    product_label = translate_product_name(product.get("display_name") or product.get("name") or "")
-    with db_conn() as conn:
+    product_label = translate_product_name(
+        product.get("display_name") or product.get("name") or ""
+    )
+
+    with get_session() as s:
         try:
-            # BEGIN IMMEDIATE acquires a write lock immediately, preventing
-            # concurrent writers from sneaking in between our read and write.
-            conn.execute("BEGIN IMMEDIATE")
-            cur = conn.cursor()
-            # Atomic deduction: only succeeds when balance is sufficient.
-            cur.execute(
-                "UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?",
-                (final_price, user["id"], final_price),
+            # V47 atomic deduction: only succeeds when balance is
+            # sufficient. The implicit transaction held by the session
+            # gives us the BEGIN IMMEDIATE semantics on SQLite and
+            # row-level lock semantics on Postgres.
+            result = s.execute(
+                update(User)
+                .where(User.id == user["id"], User.balance >= final_price)
+                .values(balance=User.balance - final_price)
             )
-            if cur.rowcount == 0:
-                conn.rollback()
+            if result.rowcount == 0:
+                # No row matched — either the user vanished (very
+                # unusual) or balance < price. Either way the legacy
+                # code raised InsufficientBalance.
+                s.rollback()
                 raise InsufficientBalance("رصيدك غير كافٍ")
-            cur.execute("""
-                INSERT INTO orders (order_code,user_id,provider,game_key,game_name,product_id,product_name,player_id,price,status,created_at,updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (order_code, user["id"], product["provider"], product["game_key"], game["name"], product["id"], product_label, player_id, final_price, "waiting", now, now))
-            conn.commit()
-            order_id = cur.lastrowid
+
+            order = Order(
+                order_code=order_code,
+                user_id=user["id"],
+                provider=product["provider"],
+                game_key=product["game_key"],
+                game_name=game["name"],
+                product_id=product["id"],
+                product_name=product_label,
+                player_id=player_id,
+                price=final_price,
+                status="waiting",
+                created_at=now,
+                updated_at=now,
+            )
+            s.add(order)
+            s.flush()  # populate order.id without releasing the tx
+            order_id = order.id
+
+            s.commit()
         except InsufficientBalance:
+            # Already rolled back above; re-raise without wrapping.
             raise
         except Exception:
-            conn.rollback()
+            s.rollback()
             raise
+
     return order_id, order_code
 
 
