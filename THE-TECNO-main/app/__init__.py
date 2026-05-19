@@ -167,12 +167,6 @@ def create_app(config_name: Optional[str] = None) -> Flask:
 
 
 # ---------------------------------------------------------------------------
-# Module-level singleton — what wsgi.py imports
-# ---------------------------------------------------------------------------
-app = create_app()
-
-
-# ---------------------------------------------------------------------------
 # wsgi.py compatibility re-exports
 # ---------------------------------------------------------------------------
 # wsgi.py does:
@@ -416,6 +410,21 @@ def __getattr__(name: str):
         from app import extensions as _ext
         return getattr(_ext, name)
     raise AttributeError(f"module 'app' has no attribute {name!r}")
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton — what wsgi.py imports
+# ---------------------------------------------------------------------------
+# Hotfix (post-session 4): ``app = create_app()`` must be the LAST executable
+# statement in this module. ``create_app()`` calls ``_apply_secret_key``,
+# ``_register_jinja``, ``_enforce_redis_in_production``, ``_ping_redis``, and
+# ``_ensure_upload_folder`` — all of which are defined later in this file.
+# Python only binds those names to the module namespace once their ``def``
+# statements have executed. An earlier revision placed this line above the
+# helper defs, which raised ``NameError: name '_apply_secret_key' is not
+# defined`` at import time and crashed the smoke test. Keep this at the bottom.
+app = create_app()
+
 
 __all__ = [
     "create_app",
