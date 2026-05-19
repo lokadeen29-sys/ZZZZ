@@ -13,7 +13,7 @@
 | 0 | التحضير + إنشاء الخطة | ✅ مكتملة | 2026-05-18 |
 | 1 | إضافة SQLAlchemy + Models | ✅ مكتملة | 2026-05-18 |
 | 2 | تهيئة Alembic + baseline | ✅ مكتملة | 2026-05-18 |
-| 3 | إعادة كتابة database.py بـ ORM | ⏳ قيد التنفيذ (PRs #1, #2, #3, #4 ✅ مدموجة، PR #5 جاهز للمراجعة) | - |
+| 3 | إعادة كتابة database.py بـ ORM | ⏳ شبه مكتملة (PRs #1-#5 ✅ مدموجة، PR #6 جاهز للمراجعة) | - |
 | 4 | كتابة سكربت نقل البيانات | ⏸️ لم تبدأ | - |
 | 5 | تثبيت Postgres على Hetzner | ⏸️ لم تبدأ | - |
 | 6 | تنفيذ النقل + الاختبار | ⏸️ لم تبدأ | - |
@@ -360,7 +360,7 @@ cd /root/project
 
 ## 🔄 الجلسة 3: تحويل database.py لاستخدام ORM
 
-**الحالة:** قيد التنفيذ (PRs #1, #2, #3, #4 ✅ مدموجة · PR #5 جاهز للمراجعة)
+**الحالة:** شبه مكتملة (PRs #1, #2, #3, #4, #5 ✅ مدموجة · PR #6 جاهز للمراجعة)
 
 **الهدف:** كل دوال `database.py` (~80 دالة) تستخدم SQLAlchemy داخلياً، لكن نفس الـ signatures (لا يكسر شيء).
 
@@ -390,8 +390,8 @@ def get_user(user_id):
 - **PR #2:** ✅ **مدموج** — دوال القراءة (`get_user`, `get_game`, `list_games`, `get_product`, `list_products`)
 - **PR #3:** ✅ **مدموج** — دوال الطلبات (`list_orders`, `list_user_orders`, `get_order`, `update_order`)
 - **PR #4:** ✅ **مدموج** — دوال الإيداع (`create_deposit`, `list_deposits_for_user`, `list_deposits`, `get_deposit`, `update_deposit`)
-- **PR #5:** ✅ **جاهز للمراجعة** — الدوال الحرجة (`set_user_balance`, `change_balance`, `create_order`)
-- **PR #6:** الباقي (audit_log, admin functions)
+- **PR #5:** ✅ **مدموج** — الدوال الحرجة (`set_user_balance`, `change_balance`, `create_order`)
+- **PR #6:** ✅ **جاهز للمراجعة** — الباقي (auth + 2FA + admin + audit_log + catalog admin + public reads)
 
 ### ✅ ما تم إنجازه في PR #1 (الموجة الأولى):
 
@@ -749,6 +749,213 @@ cd /root/project
 - **مهم**: لو لاحظت أي فرق في الرصيد بين قبل وبعد، تواصل فوراً قبل الاستمرار في PR #6.
 
 ---
+
+### ✅ ما تم إنجازه في PR #6 (الموجة السادسة والأخيرة — كل الباقي):
+
+> 🏁 **هذه آخر موجة في الجلسة 3.** بعد دمجها، تنتهي مرحلة "تحويل database.py وراء الكواليس" وتبقى فقط **DDL helpers** (init_db, ensure_indexes, seed_local_provider_catalog, attach_generated_posters) مكتوبة بـ raw SQL — وهذه ستُستبدل بـ Alembic migrations في الجلسة 7 (التنظيف النهائي).
+
+#### 1. تحويل ~40 دالة في موجة واحدة
+موزَّعة على المجموعات التالية:
+
+**(أ) دورة حياة المستخدم + المصادقة (15 دالة)**
+
+- `create_user`, `authenticate`, `get_user_by_email`, `get_user_by_id`, `get_user_by_google_sub`, `link_user_google_sub`, `create_user_oauth`.
+- `update_user_profile` (مع تغيير سلوكي طفيف: عند تمرير `name=None` و `phone=None` معاً، الدالة الآن **no-op** بدل تنفيذ UPDATE فارغ — مطابق دلالياً للسلوك القديم لأن الـ legacy استخدم `COALESCE(?, name)` الذي لا يغيّر شيئاً).
+- `set_pending_email_change`, `confirm_pending_email_change` (مع فحص "البريد الجديد محجوز لمستخدم آخر").
+- `set_user_email_token`, `verify_user_email` (24h expiry).
+- `set_password_reset_token`, `get_user_by_reset_token`, `reset_user_password` (1h expiry + **V53 session_version bump** للتسجيل الإجباري من باقي الأجهزة).
+
+**(ب) المصادقة الثنائية 2FA (4 دوال)**
+
+- `set_user_totp_secret` — يمسح backup codes والـ enabled flag تلقائياً.
+- `enable_user_totp` — يسجّل ``totp_enabled_at = now``.
+- `disable_user_totp` — يصفّر كل أعمدة 2FA.
+- `update_user_backup_codes` — استبدال blob الأكواد الاحتياطية.
+
+**(ج) كتابة كاتالوج الأدمن (13 دالة)**
+
+- `upsert_game` (يحافظ على quirk الـ legacy: ON CONFLICT لا يلمس `active`).
+- `add_custom_game` (admin form: يحدّث كل شيء بما فيه `active` و `image_url`).
+- `set_game_active`, `set_game_show_on_home`, `set_game_home_sort_order` (مع clamp للقيم السالبة → 0).
+- `update_game_image`, `update_game_pricing` (whitelist GLOBAL/USD/SYP).
+- `upsert_product` (نفس quirk الـ `active`).
+- `delete_products_for_game` (DELETE WHERE provider+game_key).
+- `update_product_sort_orders` (bulk update داخل tx واحدة).
+- `update_manual_syp_prices` (bulk + fallback آمن للقيم غير الرقمية).
+- `update_products_admin` (whitelist pricing_mode + إعادة حساب sell_price لـ fixed_syp).
+- `update_profit_margin` — أهم دالة في هذه المجموعة:
+  - يعيد حساب `sell_price = round(base_price * margin, 2)` لكل المنتجات.
+  - يصفّر overrides الـ `pricing_mode='fixed_syp'` و `manual_price_syp>0` (وإلا الهامش الجديد لا يظهر).
+  - **مهم على Postgres**: استخدم Python loop بدل `func.round(double, 2)` لأن Postgres لا يعرّف `round(double precision, integer)` — فقط `round(numeric, integer)`. الـ ORM session يجمّع كل UPDATEs في commit واحد فالأداء مقبول.
+
+**(د) مجموعات المنتجات (5 دوال)**
+
+- `list_product_groups` (CASE-style ordering + `only_active` filter).
+- `get_product_group` (مع coercion آمن للنصوص).
+- `create_product_group` (idempotent عبر UNIQUE key).
+- `update_product_group` (blanket update لكل الحقول).
+- `delete_product_group` (يفصل المنتجات أولاً عبر `group_id=NULL` ثم يحذف المجموعة — كلا الخطوتين في tx واحدة لمنع orphan refs).
+
+**(هـ) القراءات العامة + التجميعات (5 دوال)**
+
+- `list_public_games` — LEFT JOIN على products active=1، يحافظ على ألعاب بدون باقات.
+- `list_home_games` — فلتر `show_on_home=1` + ترتيب `home_sort_order`.
+- `list_public_product_groups_for_home` — INNER JOIN على games + LEFT JOIN على products.
+- `list_all_game_groups` — admin view: يشمل inactive games AND inactive products.
+- `list_product_games_from_products` — لاكتشاف منتجات يتيمة (game_key بدون صف في games).
+
+**(و) القراءات الإدارية (10 دوال)**
+
+- `stats` (counts by status + revenue).
+- `list_users` + `search_users` + `get_user_by_id` — جميعها narrow projection (لا تسرّب password_hash / TOTP / tokens).
+- `search_users` — multi-column LIKE مع `escape="\\"` + DISTINCT للتعامل مع الـ JOIN.
+- `user_financial_summary` — **V49-HOTFIX محفوظ**: `SUM(COALESCE(amount_usd, 0))` لتجنّب خلط SYP و USD.
+- `list_user_deposits_admin` — كامل أعمدة deposits.
+- `list_orders_for_auto_refresh` — فلتر دقيق على `status IN (...)` + `provider_order_id IS NOT NULL AND != ''`.
+- `list_all_games_for_admin`, `list_all_products_for_admin` (مع JOIN على product_groups + حقن `display_name`).
+- `accounting_summary` — أصعب دالة: 4 aggregates منفصلة + `by_game` GROUP BY + `recent` LIMIT 100 مع JOIN على products + users + `sales_override` setting.
+
+**(ز) سجل التدقيق Audit Log (3 دوال)**
+
+- `insert_audit_log` — مع truncation للأعمدة (action≤120, target_type≤60, ip≤64, ...) + alias `meta`/`metadata` (لأن `metadata` كلمة محجوزة في SQLAlchemy declarative). **لا يرفع استثناء أبداً** — observability يجب ألا يكسر الـ request.
+- `list_audit_logs` — كل الفلاتر اختيارية + clamp `[1, 1000]` للـ limit + ترتيب `ts DESC, id DESC` + dict key الـ public هو `metadata` (اسم العمود الـ legacy).
+- `count_audit_logs` — يُرجع 0 عند أي خطأ.
+
+**(ح) متفرّقات (8 دوال)**
+
+- `seed_admin` — bootstrap idempotent.
+- `search_suggest` — substring match على games + products، case-insensitive عبر `func.lower(...)` (بديل portable لـ `COLLATE NOCASE`)، مع `escape="\\"` للتعامل مع `%` و `_` في input المستخدم.
+- `get_product_by_id` (يُرجع inactive — للـ RQ worker).
+- `get_order_public` — **V50 (CC)** explicit ownership check محفوظ، مع sentinel `"*"` للـ admin.
+- `can_download_proof` — IDOR fix V53 (الأدمن يمر، الباقي عبر `proof_filename` lookup).
+
+#### 2. ما لم يُحوَّل (مع التبرير)
+
+5 دوال تبقى تستخدم `with db_conn()` raw SQL:
+
+| الدالة | التبرير |
+|--------|---------|
+| `connect`, `db_conn` | helpers أساسية، تُستخدم من اختبارات + DDL paths. |
+| `ensure_indexes` | DDL (CREATE INDEX, ALTER TABLE) — مكان Alembic. |
+| `init_db` / `_init_db_inner` | DDL bootstrap — مكان Alembic. |
+| `seed_local_provider_catalog` | bulk seeder من JSON file، تشغيل لمرّة واحدة، تحويله مخاطرة بلا فائدة. |
+| `attach_generated_posters` | filesystem + DB hybrid، تشغيل دوري admin-only، نفس التبرير. |
+
+كل هذه ستُمسح أو تنتقل إلى Alembic في **الجلسة 7 (التنظيف النهائي)** بعد التأكد من استقرار الإنتاج على Postgres.
+
+#### 3. اختبارات جديدة `tests/test_database_orm_pr6.py`
+~70+ اختبار pytest مقسَّمة على 22 class، تغطّي:
+
+- **dict shape** لكل دالة قراءة (column set parity).
+- **narrow projection** في `list_users`/`get_user_by_id`/`search_users` — تأكيد أن `password_hash` و `totp_*` لا تظهر.
+- **edge cases** على tokens: invalid → arabic message، expired → arabic message.
+- **session_version bump** على password reset (V53 anti-cookie-replay).
+- **TOTP state machine**: set → enable → disable → wipe (idempotent).
+- **upsert quirks**: ON CONFLICT لا يلمس `active` في `upsert_game`/`upsert_product`.
+- **negative + invalid inputs**: `home_sort_order=-3` → 0، `pricing_mode="BOGUS"` → "usd"، `manual_syp_price="not-num"` → 0.0.
+- **catalog SELECTs**: ترتيب CASE-style (sort_order=0 → 999999)، LEFT JOIN يحافظ على games بلا منتجات، active filter يعمل.
+- **financial integrity**: `user_financial_summary` يجمع `amount_usd` فقط (V49-HOTFIX) — اختبار صريح بمزج 5000 SYP و 10 USD.
+- **search_suggest LIKE escape**: `%` كـ user input يبحث عن `%` حرفياً (لا يطابق كل شيء).
+- **search_users DISTINCT**: مستخدم بـ 3 طلبات يظهر مرّة واحدة في النتيجة.
+- **audit log**: truncation الأعمدة، `metadata` dict key (ليس `meta`)، ترتيب `ts DESC, id DESC`، فلاتر متعدّدة، clamping للـ limit.
+- **`get_order_public`** ownership: ValueError على `user_id=None`، owner-only، admin sentinel `"*"` يعمل.
+- **`update_profit_margin`**: إعادة حساب على كل الـ 3 pricing modes + reset overrides.
+
+#### 4. تحديث `tests/test_db_connection_leaks.py`
+floor العداد 50 → **3** (نزل العدد الفعلي من 64 إلى 5). تعليق محدّث يشرح أن الجلسة 7 ستحذف الـ assertion كلّياً.
+
+### 📍 المخرجات (الملفات المعدّلة + الجديدة في PR #6):
+
+| الملف | تغيير | الوصف |
+|------|-------|-------|
+| `database.py` | معدّل (~40 دالة) | كل ما تبقى من runtime data path → ORM |
+| `tests/test_database_orm_pr6.py` | جديد (~870 سطر) | ~70+ اختبار parity |
+| `tests/test_db_connection_leaks.py` | معدّل (5 أسطر) | floor 50 → 3 + تعليق محدّث |
+
+### 🛡️ ضمانات السلامة (PR #6):
+- ✅ كل التواقيع وقيم الإرجاع كما هي — لا caller (في `app/routes/*`, `audit.py`, `tasks.py`, `wsgi.py`, conftest، أو `security_2fa.py`) يحتاج تعديل.
+- ✅ شكل dict مطابق للـ legacy `sqlite3.Row → dict` (نفس الأعمدة، بنفس الأسماء، حتى `audit_log.metadata` معالَج عبر alias).
+- ✅ Narrow projection لـ user listings محفوظة (لا تسريب password_hash / TOTP).
+- ✅ V49-HOTFIX (`amount_usd` summing) + V50 (CC) (explicit ownership) + V53 (session bump + IDOR proof check) كلها محفوظة.
+- ✅ كل الـ transactions ذرية + rollback عند أي exception (إلا audit log الذي **يبتلع** الأخطاء عمداً — observability يجب ألا تكسر الـ request).
+- ✅ `with db_conn()` انخفض من 64 إلى **5** — كلها DDL/seeder helpers ستُحذف في الجلسة 7.
+- ✅ تم التحقّق نحوياً عبر `python -m py_compile`. تشغيل pytest الفعلي يتم على CI.
+
+### 🚀 ما يفعله المستخدم بعد PR #6:
+
+#### الخطوة 1: راجع الـ PR على GitHub (`feat/postgres-migration-session3-pr6`)
+أكبر diff في كل الجلسة 3. كل دالة معدّلة لها docstring `V72 / session 3 / PR #6` يشرح ما حُفظ من الـ legacy.
+
+#### الخطوة 2: deploy كالعادة
+```bash
+scp ZZZZ-main.zip root@46.224.87.50:/root/
+ssh root@46.224.87.50
+/root/deploy.sh /root/tecnogems_latest.zip
+```
+
+#### الخطوة 3: 🚨 اختبار شامل — هذا يلامس كل صفحة في الموقع تقريباً
+
+**صفحات المستخدم:**
+- صفحة التسجيل: حساب جديد + بريد فعلاً مستخدم (يجب رفض مع رسالة عربية).
+- صفحة تسجيل الدخول: حساب صحيح + خاطئ + مُعطّل (active=0).
+- صفحة تأكيد البريد: رابط صحيح + منتهي (حدّث `email_token_created_at` يدوياً قبل 24h).
+- صفحة "نسيت كلمة السر": طلب رابط + استخدامه + إعادة تسجيل دخول (يجب أن يُلغي session القديم).
+- صفحة /profile: تعديل الاسم فقط (الهاتف لا يُمسح) + طلب تغيير بريد + تأكيده.
+
+**صفحات OAuth (إذا مفعّل):**
+- تسجيل دخول Google لمستخدم جديد → يُنشأ مع `email_verified=1` و `google_sub`.
+- تسجيل دخول لمستخدم موجود بنفس البريد → يربط `google_sub` فقط.
+
+**صفحات 2FA (الأدمن):**
+- /admin/2fa/setup → /admin/2fa/confirm → /admin/2fa/disable → إعادة الدورة.
+- استهلاك backup code يُنقص العدد، تجديدها يستبدل الـ blob.
+
+**صفحات الكاتالوج العامة:**
+- الصفحة الرئيسية: تعرض ألعاب `show_on_home=1` فقط، بترتيب `home_sort_order` (0 في الآخر).
+- /games/<provider>: تعرض ألعاب الـ provider.
+- /products/<...>: تعرض المنتجات الـ active مع ترتيب `sort_order`.
+
+**صفحات الأدمن:**
+- /admin: stats صحيحة.
+- /admin/users + بحث: بالـ name / email / phone / id / player_id (من الـ orders) — كلها تعمل، DISTINCT (لا تكرار).
+- /admin/user/<id>: عرض user_financial_summary (أرقام usd صحيحة).
+- /admin/games: list_all_games_for_admin (يشمل inactive).
+- /admin/games/edit: add_custom_game → upsert.
+- /admin/games/<key>/products: list_all_products_for_admin (يشمل inactive، JOIN على groups).
+- /admin/games/<key>/groups: create/update/delete groups → فحص أن products لا تحذف.
+- /admin/settings/profit_margin: قيمة جديدة → كل الـ products تُعاد حساب sell_price + overrides تتصفّر.
+- /admin/orders + /admin/deposits: تحديث الحالة.
+- /admin/audit_logs: list + count + filters.
+
+**سيناريوهات أمنية:**
+- /uploads/proof/<filename>: مستخدم آخر ≠ owner → 403.
+- get_order_public لطلب ليس له → null.
+
+#### الخطوة 4: شغّل الاختبارات (اختياري)
+```bash
+cd /root/project
+.venv/bin/pytest tests/test_database_orm_pr6.py -v
+```
+
+### ✅ معايير النجاح لـ PR #6:
+- [ ] الـ CI يمرّ على branch (>500 اختبار في كامل السويت).
+- [ ] الموقع يعمل بشكل طبيعي بعد deploy.
+- [ ] لا فرق ملحوظ في تجربة المستخدم أو الأدمن.
+- [ ] التسجيل + تسجيل الدخول + التحقق من البريد + استرداد كلمة السر يعمل.
+- [ ] 2FA setup/confirm/disable يعمل.
+- [ ] إدارة الكاتالوج (games, products, groups) تعمل.
+- [ ] لوحة الأدمن (stats, users, search, accounting) تعمل بنفس الأرقام.
+- [ ] audit_log يُكتب على كل عملية إدارية.
+
+### 🔄 Rollback إذا فشل أي شيء:
+- أعد deploy للنسخة السابقة من `deploy.sh` (يحفظ نسخة احتياطية تلقائياً).
+- لا تغيير في DB schema — لا حاجة لـ rollback على البيانات.
+- بما أن هذا أكبر PR، يستحسن **الانتظار 24-48 ساعة بعد deploy قبل dispatch الجلسة 4**.
+
+### 📝 ملاحظات للجلسة التالية (الجلسة 4):
+بعد دمج PR #6 وتأكّد المستخدم من استقرار الإنتاج، الكود **جاهز تماماً** للعمل على Postgres بمجرد ضبط `DATABASE_URL` — كل الدوال تستخدم SQLAlchemy ORM بدلاً من sqlite3 خام. الجلسة 4 تكتب سكربت نقل البيانات الفعلي من SQLite إلى Postgres.
+
+---
 - [ ] الموقع يعمل تماماً كما كان (لا تغيير في السلوك)
 - [ ] جميع الاختبارات تنجح
 - [ ] صفحات الأدمن سليمة
@@ -1013,7 +1220,7 @@ Kiro سيقرأ ملف `MIGRATION_PLAN.md`، يفحص حالة كل جلسة، �
 ---
 
 **تاريخ إنشاء الخطة:** 2026-05-18  
-**آخر تحديث:** 2026-05-19 (الجلسة 3 / PR #5 — تحويل الدوال الحرجة `set_user_balance`, `change_balance`, `create_order` إلى ORM)  
+**آخر تحديث:** 2026-05-19 (الجلسة 3 / PR #6 — تحويل ~40 دالة متبقية إلى ORM؛ بعدها لا يبقى من raw SQL في `database.py` سوى DDL helpers)  
 **المسؤول:** Kiro + المستخدم  
 
 > 💬 لأي استفسار: ابدأ محادثة جديدة وقل _"عندي سؤال عن MIGRATION_PLAN.md"_

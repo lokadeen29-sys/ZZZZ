@@ -40,29 +40,35 @@ def test_no_direct_connect_outside_db_conn():
 
 
 def test_db_conn_usage_count():
-    """Sanity check: db_conn() should still be used extensively.
+    """Sanity check: db_conn() is still used for the bootstrap / DDL paths.
 
     V72 / session 3: as the Postgres migration converts functions to
     SQLAlchemy ORM, the count of ``with db_conn()`` blocks gradually
-    drops. This sentinel keeps CI honest — if it falls below the
-    floor someone has rewritten too much in one PR (or accidentally
-    deleted ``database.py``). The floor is reduced in every PR by
-    roughly the number of functions migrated:
+    drops. By the end of session 3 only the bootstrap / DDL helpers
+    keep using ``db_conn()`` because they execute schema-mutating
+    statements that are owned by Alembic on Postgres:
 
       * end of session 2:  ~90 (raw SQL everywhere)
       * after PR #1:        ~82
       * after PR #2:        ~75
       * after PR #3:        ~71
       * after PR #4:        ~67
-      * after PR #5:        ~64  ← current (3 critical helpers migrated)
+      * after PR #5:        ~64
+      * after PR #6:         5  ← current (only DDL / seed / poster
+                                   helpers + the example in the
+                                   ``db_conn`` docstring remain)
 
-    We assert >=50 to give the remaining waves head-room without
-    having to bump this sentinel on every PR.
+    We assert >=3 to keep CI honest — if it drops below the floor
+    someone has either deleted ``database.py`` itself or moved the
+    DDL helpers to Alembic without updating this guard. The next
+    realistic drop is in session 7 (final cleanup), where
+    ``connect()`` / ``db_conn()`` are deleted entirely.
     """
     db_file = Path(__file__).resolve().parent.parent / "database.py"
     content = db_file.read_text(encoding="utf-8")
     count = content.count("with db_conn()")
-    assert count >= 50, (
-        f"Expected at least 50 uses of `with db_conn()`, found {count}. "
-        "If this is intentional (deeper Postgres migration), update the floor."
+    assert count >= 3, (
+        f"Expected at least 3 uses of `with db_conn()` (DDL / seeders), "
+        f"found {count}. If this is intentional (session 7 cleanup), "
+        "delete this assertion entirely."
     )

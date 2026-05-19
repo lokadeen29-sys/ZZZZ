@@ -225,53 +225,155 @@ def _escape_like(q):
 
 
 def search_suggest(q, limit=8):
-    """Lightweight autocomplete across games (name) + product groups (label)."""
-    with db_conn() as conn:
-        qlike = f"%{_escape_like(q)}%"
-        games = [dict(r) for r in conn.execute("""
-            SELECT 'game' AS kind, provider, game_key, name AS label, image_url
-            FROM games
-            WHERE active=1 AND name LIKE ? ESCAPE '\\' COLLATE NOCASE
-            ORDER BY name LIMIT ?
-        """, (qlike, limit)).fetchall()]
+    """Lightweight autocomplete across games (name) + product names.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved exactly:
+
+      * Match is ``LIKE %q%`` — substring, case-insensitive.
+      * The legacy SQL used ``COLLATE NOCASE``; we replace that with
+        ``func.lower(...) LIKE func.lower(...)`` which is portable on
+        Postgres without a custom collation.
+      * Special LIKE wildcards (``%``, ``_``, ``\\``) in ``q`` are
+        escaped through ``_escape_like`` (legacy guard).
+      * Returns up to ``limit`` games. If fewer than ``limit`` games
+        matched, the remainder is filled from products. The
+        product results are deduplicated by ``(provider, game_key, name)``
+        — same as the legacy ``GROUP BY``.
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Game, Product
+    from app.db.session import get_session
+
+    qlike = f"%{_escape_like(q)}%".lower()
+    with get_session() as s:
+        # Games
+        game_rows = (
+            s.query(Game.provider, Game.game_key, Game.name, Game.image_url)
+            .filter(
+                Game.active == 1,
+                func.lower(Game.name).like(qlike, escape="\\"),
+            )
+            .order_by(Game.name.asc())
+            .limit(limit)
+            .all()
+        )
+        games = [
+            {
+                "kind": "game",
+                "provider": r.provider,
+                "game_key": r.game_key,
+                "label": r.name,
+                "image_url": r.image_url,
+            }
+            for r in game_rows
+        ]
+
         remaining = max(1, limit - len(games))
-        products = [dict(r) for r in conn.execute("""
-            SELECT 'product' AS kind, provider, game_key, name AS label
-            FROM products
-            WHERE active=1 AND name LIKE ? ESCAPE '\\' COLLATE NOCASE
-            GROUP BY provider, game_key, name
-            ORDER BY name LIMIT ?
-        """, (qlike, remaining)).fetchall()]
-        return games + products
+        product_rows = (
+            s.query(Product.provider, Product.game_key, Product.name)
+            .filter(
+                Product.active == 1,
+                func.lower(Product.name).like(qlike, escape="\\"),
+            )
+            .group_by(Product.provider, Product.game_key, Product.name)
+            .order_by(Product.name.asc())
+            .limit(remaining)
+            .all()
+        )
+        products = [
+            {
+                "kind": "product",
+                "provider": r.provider,
+                "game_key": r.game_key,
+                "label": r.name,
+            }
+            for r in product_rows
+        ]
+    return games + products
 
 
 def get_user_by_google_sub(sub):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE google_sub=?", (sub,)).fetchone()
-        return dict(row) if row else None
+    """Look up a user by their Google ``sub`` (OAuth subject id).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Returns a
+    plain ``dict`` (full ``users`` column set) or ``None`` — same shape
+    as the legacy ``dict(sqlite3.Row)``.
+    """
+    from app.db.models import User
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = s.query(User).filter(User.google_sub == sub).first()
+        return row_to_dict(row) if row is not None else None
 
 
 def link_user_google_sub(user_id, sub):
-    with db_conn() as conn:
-        conn.execute("UPDATE users SET google_sub=? WHERE id=?", (sub, user_id))
-        conn.commit()
+    """Attach a Google ``sub`` to an existing user (account linking).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. No
+    return value (legacy did not return one). Re-raises on exception
+    with rollback.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User).where(User.id == user_id).values(google_sub=sub)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def create_user_oauth(name, email, google_sub):
-    """Create a user from OAuth (no password, email already verified)."""
-    import secrets as _secrets, time as _t
-    with db_conn() as conn:
+    """Create a user from OAuth (no password, email already verified).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Preserves
+    legacy contract:
+
+      * Returns the new user's ``id`` on success (int).
+      * Returns ``None`` if the INSERT fails (e.g. duplicate email
+        racing with a normal registration). The legacy code swallowed
+        any exception and returned ``None`` — caller treats that as
+        "couldn't create" without distinguishing root cause.
+      * Generates a random throw-away password hash so the row
+        satisfies the NOT NULL constraint on ``password_hash`` even
+        though OAuth users never authenticate with one.
+    """
+    import secrets as _secrets
+    import time as _t
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
         try:
             random_pw = generate_password_hash(_secrets.token_urlsafe(32))
-            cur = conn.execute(
-                "INSERT INTO users(name, email, phone, password_hash, role, email_verified, google_sub, created_at) "
-                "VALUES (?, ?, '', ?, 'user', 1, ?, ?)",
-                (name or email.split("@")[0], email, random_pw, google_sub, int(_t.time()))
+            user = User(
+                name=name or email.split("@")[0],
+                email=email,
+                phone="",
+                password_hash=random_pw,
+                role="user",
+                email_verified=1,
+                google_sub=google_sub,
+                created_at=int(_t.time()),
             )
-            conn.commit()
-            uid = cur.lastrowid
+            s.add(user)
+            s.flush()
+            uid = user.id
+            s.commit()
             return uid
         except Exception:
+            s.rollback()
             return None
 
 
@@ -548,15 +650,35 @@ def _init_db_inner(conn):
 
 
 def seed_admin(email, password):
-    with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM users WHERE email=?", (email,))
-        if not cur.fetchone():
-            cur.execute(
-                "INSERT INTO users (name,email,password_hash,role,balance,email_verified,created_at) VALUES (?,?,?,?,?,?,?)",
-                ("Admin", email, generate_password_hash(password), "admin", 0, 1, int(time.time()))
-            )
-        conn.commit()
+    """Idempotently create the bootstrap admin account.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Called
+    from ``wsgi.py`` at boot — must be safe to call multiple times.
+    Skips the INSERT when an account with the same email already
+    exists (the legacy code did the same).
+    """
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            existing = s.query(User.id).filter(User.email == email).first()
+            if existing is None:
+                s.add(
+                    User(
+                        name="Admin",
+                        email=email,
+                        password_hash=generate_password_hash(password),
+                        role="admin",
+                        balance=0,
+                        email_verified=1,
+                        created_at=int(time.time()),
+                    )
+                )
+                s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def set_setting(key, value):
@@ -592,149 +714,356 @@ def get_setting(key, default=None):
 
 
 def create_user(name, email, phone, password, email_verified=0, email_token=None):
-    with db_conn() as conn:
+    """Create a regular (password-based) user account.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Preserves
+    the legacy contract exactly:
+
+      * Returns ``(True, None)`` on success.
+      * Returns ``(False, "البريد مستخدم مسبقًا")`` on UNIQUE collision
+        on ``users.email`` — every other exception bubbles up so the
+        caller sees an HTTP 500 instead of pretending the registration
+        worked.
+      * ``email`` is lower-cased before insert (mirrors legacy).
+      * ``email_token_created_at`` is set to ``int(time.time())`` only
+        when a token is supplied (legacy: ``... if email_token else None``).
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
         try:
-            cur = conn.cursor()
-            cur.execute(
-                """INSERT INTO users
-                   (name,email,phone,password_hash,role,balance,email_verified,email_token,email_token_created_at,created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    name,
-                    email.lower(),
-                    phone,
-                    generate_password_hash(password),
-                    "user",
-                    0,
-                    int(email_verified),
-                    email_token,
-                    int(time.time()) if email_token else None,
-                    int(time.time())
-                )
+            user = User(
+                name=name,
+                email=email.lower(),
+                phone=phone,
+                password_hash=generate_password_hash(password),
+                role="user",
+                balance=0,
+                email_verified=int(email_verified),
+                email_token=email_token,
+                email_token_created_at=int(time.time()) if email_token else None,
+                created_at=int(time.time()),
             )
-            conn.commit()
+            s.add(user)
+            s.commit()
             return True, None
-        except sqlite3.IntegrityError:
+        except IntegrityError:
+            s.rollback()
             return False, "البريد مستخدم مسبقًا"
+        except Exception:
+            s.rollback()
+            raise
 
 
 def authenticate(email, password):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email=? AND active=1", (email.lower(),)).fetchone()
-        if row and check_password_hash(row["password_hash"], password):
-            return dict(row)
+    """Return the user dict if (email, password) is correct AND the
+    account is active, else ``None``.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved:
+
+      * Email is lower-cased before lookup.
+      * ``active != 1`` users return ``None`` even when password is
+        right (account-disable kill switch).
+      * Bad password also returns ``None`` (caller logs / rate-limits).
+      * On success: returns a plain dict with the FULL ``users``
+        column set (so callers can read ``user["session_version"]``,
+        ``user["totp_enabled"]``, etc).
+    """
+    from app.db.models import User
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = (
+            s.query(User)
+            .filter(User.email == email.lower(), User.active == 1)
+            .first()
+        )
+        if row is not None and check_password_hash(row.password_hash, password):
+            return row_to_dict(row)
         return None
 
 
 # --- V51 task B: admin 2FA helpers ---------------------------------------
 def set_user_totp_secret(user_id, secret):
-    """Store a NEW (unverified) TOTP secret. Does not flip `totp_enabled`
-    — that happens via `enable_user_totp` once the first code is confirmed."""
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET totp_secret=?, totp_enabled=0, totp_backup_codes=NULL, totp_enabled_at=NULL WHERE id=?",
-            (secret, int(user_id)),
-        )
-        conn.commit()
+    """Store a NEW (unverified) TOTP secret. Does not flip
+    ``totp_enabled`` — that happens via ``enable_user_totp`` once the
+    first code is confirmed.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Same
+    multi-column UPDATE as the legacy: storing a new secret invalidates
+    any previous backup codes.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == int(user_id))
+                .values(
+                    totp_secret=secret,
+                    totp_enabled=0,
+                    totp_backup_codes=None,
+                    totp_enabled_at=None,
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def enable_user_totp(user_id, backup_codes_json):
-    """Flip `totp_enabled` on (called after the user confirms a valid code).
-    `backup_codes_json` is produced by security_2fa.serialize_backup_codes."""
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET totp_enabled=1, totp_backup_codes=?, totp_enabled_at=? WHERE id=?",
-            (backup_codes_json, int(time.time()), int(user_id)),
-        )
-        conn.commit()
+    """Flip ``totp_enabled`` on (called after the user confirms a valid
+    code). ``backup_codes_json`` is produced by
+    ``security_2fa.serialize_backup_codes``.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == int(user_id))
+                .values(
+                    totp_enabled=1,
+                    totp_backup_codes=backup_codes_json,
+                    totp_enabled_at=int(time.time()),
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def disable_user_totp(user_id):
-    """Wipe every 2FA column for the user (setup must restart from scratch)."""
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET totp_secret=NULL, totp_enabled=0, totp_backup_codes=NULL, totp_enabled_at=NULL WHERE id=?",
-            (int(user_id),),
-        )
-        conn.commit()
+    """Wipe every 2FA column for the user (setup must restart from scratch).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == int(user_id))
+                .values(
+                    totp_secret=None,
+                    totp_enabled=0,
+                    totp_backup_codes=None,
+                    totp_enabled_at=None,
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def update_user_backup_codes(user_id, backup_codes_json):
-    """Replace the stored backup-codes blob (used after consuming a code or
-    after regenerating)."""
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET totp_backup_codes=? WHERE id=?",
-            (backup_codes_json, int(user_id)),
-        )
-        conn.commit()
+    """Replace the stored backup-codes blob (used after consuming a
+    code or after regenerating).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == int(user_id))
+                .values(totp_backup_codes=backup_codes_json)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def get_user_by_email(email):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email=?", (email.lower(),)).fetchone()
-        return dict(row) if row else None
+    """Look up a user by lower-cased email. Returns full ``users`` dict
+    or ``None``.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Email is
+    lower-cased before the query so callers don't have to remember.
+    """
+    from app.db.models import User
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = s.query(User).filter(User.email == email.lower()).first()
+        return row_to_dict(row) if row is not None else None
 
 
 def verify_user_email(token):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email_token=?", (token,)).fetchone()
-        if not row:
-            return False, "رابط التفعيل غير صحيح"
+    """Activate a pending email verification token.
 
-        token_created = row["email_token_created_at"] or 0
-        # صلاحية الرابط 24 ساعة
-        if int(time.time()) - int(token_created) > 86400:
-            return False, "انتهت صلاحية رابط التفعيل. سجل مرة أخرى أو اطلب رابطًا جديدًا."
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Preserves:
 
-        conn.execute(
-            "UPDATE users SET email_verified=1, email_token=NULL, email_token_created_at=NULL WHERE id=?",
-            (row["id"],)
-        )
-        conn.commit()
-        return True, None
+      * 24-hour token expiry (86400 seconds).
+      * Returns ``(True, None)`` on success, or
+        ``(False, "<arabic message>")`` for invalid / expired tokens.
+      * Wipes ``email_token`` + ``email_token_created_at`` on success
+        so the link is single-use.
+    """
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            row = s.query(User).filter(User.email_token == token).first()
+            if row is None:
+                return False, "رابط التفعيل غير صحيح"
+
+            token_created = row.email_token_created_at or 0
+            if int(time.time()) - int(token_created) > 86400:
+                return False, "انتهت صلاحية رابط التفعيل. سجل مرة أخرى أو اطلب رابطًا جديدًا."
+
+            row.email_verified = 1
+            row.email_token = None
+            row.email_token_created_at = None
+            s.commit()
+            return True, None
+        except Exception:
+            s.rollback()
+            raise
 
 
 def set_user_email_token(user_id, token):
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET email_token=?, email_token_created_at=? WHERE id=?",
-            (token, int(time.time()), user_id)
-        )
-        conn.commit()
+    """Set a fresh email-verification token for a user.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Used by the
+    ``/resend-verification`` flow; ``email_token_created_at`` is reset
+    to ``int(time.time())`` so the 24-hour expiry restarts.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(
+                    email_token=token,
+                    email_token_created_at=int(time.time()),
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def set_password_reset_token(user_id, token):
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET reset_token=?, reset_token_created_at=? WHERE id=?",
-            (token, int(time.time()), user_id)
-        )
-        conn.commit()
+    """Set a fresh password-reset token for a user.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The token's
+    1-hour expiry is enforced in ``reset_user_password`` (where
+    ``reset_token_created_at`` is read).
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == user_id)
+                .values(
+                    reset_token=token,
+                    reset_token_created_at=int(time.time()),
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def get_user_by_reset_token(token):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE reset_token=?", (token,)).fetchone()
-        return dict(row) if row else None
+    """Look up a user by their pending password-reset token.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Returns a
+    full ``users`` dict so the caller can render the reset form with
+    the user's name. Expiry is NOT checked here (legacy behaviour) —
+    ``reset_user_password`` re-checks at submission time.
+    """
+    from app.db.models import User
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = s.query(User).filter(User.reset_token == token).first()
+        return row_to_dict(row) if row is not None else None
 
 
 def reset_user_password(token, new_password):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE reset_token=?", (token,)).fetchone()
-        if not row:
-            return False, "رابط الاستعادة غير صحيح"
+    """Consume a password-reset token and set a new password.
 
-        token_created = row["reset_token_created_at"] or 0
-        if int(time.time()) - int(token_created) > 3600:
-            return False, "انتهت صلاحية رابط الاستعادة. اطلب رابطًا جديدًا."
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Preserves
+    every safety guarantee of the legacy version:
 
-        conn.execute(
-            "UPDATE users SET password_hash=?, reset_token=NULL, reset_token_created_at=NULL, session_version=COALESCE(session_version,1)+1 WHERE id=?",
-            (generate_password_hash(new_password), row["id"])
-        )
-        conn.commit()
-        return True, None
+      * Returns ``(True, None)`` on success.
+      * Returns ``(False, "<arabic msg>")`` for invalid / expired
+        tokens (1-hour TTL).
+      * Wipes the token columns so the link is single-use.
+      * **V53 session invalidation**: increments ``session_version``
+        so all currently-active sessions for this user are forcibly
+        logged out at their next request. This blocks "reset the
+        password to evict the attacker" attacks where the attacker
+        already had a stolen cookie.
+    """
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            row = s.query(User).filter(User.reset_token == token).first()
+            if row is None:
+                return False, "رابط الاستعادة غير صحيح"
+
+            token_created = row.reset_token_created_at or 0
+            if int(time.time()) - int(token_created) > 3600:
+                return False, "انتهت صلاحية رابط الاستعادة. اطلب رابطًا جديدًا."
+
+            row.password_hash = generate_password_hash(new_password)
+            row.reset_token = None
+            row.reset_token_created_at = None
+            # V53: bump session_version so other devices are logged out.
+            row.session_version = (row.session_version or 1) + 1
+            s.commit()
+            return True, None
+        except Exception:
+            s.rollback()
+            raise
 
 
 def get_user(user_id):
@@ -767,44 +1096,116 @@ def get_user(user_id):
 
 
 def update_user_profile(user_id, name=None, phone=None):
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET name=COALESCE(?,name), phone=COALESCE(?,phone) WHERE id=?",
-            (name, phone, int(user_id))
-        )
-        conn.commit()
+    """Update name and/or phone for a user.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The legacy
+    SQL used ``COALESCE(?, name)`` so passing ``None`` for either kwarg
+    means "do not touch this column". We replicate that by only setting
+    the attribute when the caller passed a non-``None`` value.
+
+    Note: legacy did NOT lowercase ``email`` here (intentional — name
+    and phone are case-preserving). We keep that.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    values = {}
+    if name is not None:
+        values["name"] = name
+    if phone is not None:
+        values["phone"] = phone
+    if not values:
+        return  # legacy was a no-op when both args were None
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User).where(User.id == int(user_id)).values(**values)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def set_pending_email_change(user_id, new_email, token):
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET pending_email=?, pending_email_token=?, pending_email_created_at=? WHERE id=?",
-            (new_email.lower().strip(), token, int(time.time()), int(user_id))
-        )
-        conn.commit()
+    """Store the user's requested new email + verification token.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The actual
+    email swap happens in ``confirm_pending_email_change`` once the
+    user clicks the link in the new mailbox.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(User)
+                .where(User.id == int(user_id))
+                .values(
+                    pending_email=new_email.lower().strip(),
+                    pending_email_token=token,
+                    pending_email_created_at=int(time.time()),
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def confirm_pending_email_change(token):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM users WHERE pending_email_token=?", (token,)).fetchone()
-        if not row:
-            return False, "رابط تغيير البريد غير صحيح"
+    """Consume an email-change token and swap the user's email.
 
-        created = row["pending_email_created_at"] or 0
-        if int(time.time()) - int(created) > 86400:
-            return False, "انتهت صلاحية رابط تغيير البريد"
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Preserves:
 
-        new_email = row["pending_email"]
-        exists = conn.execute("SELECT id FROM users WHERE email=? AND id!=?", (new_email, row["id"])).fetchone()
-        if exists:
-            return False, "هذا البريد مستخدم في حساب آخر"
+      * 24-hour token expiry.
+      * Returns ``(False, "<arabic msg>")`` when the new email is
+        already taken by ANOTHER user (concurrent registration).
+      * Wipes the pending-email columns on success.
+      * Re-marks the new email as verified (``email_verified=1``).
+    """
+    from app.db.models import User
+    from app.db.session import get_session
 
-        conn.execute(
-            "UPDATE users SET email=?, email_verified=1, pending_email=NULL, pending_email_token=NULL, pending_email_created_at=NULL WHERE id=?",
-            (new_email, row["id"])
-        )
-        conn.commit()
-        return True, None
+    with get_session() as s:
+        try:
+            row = (
+                s.query(User)
+                .filter(User.pending_email_token == token)
+                .first()
+            )
+            if row is None:
+                return False, "رابط تغيير البريد غير صحيح"
+
+            created = row.pending_email_created_at or 0
+            if int(time.time()) - int(created) > 86400:
+                return False, "انتهت صلاحية رابط تغيير البريد"
+
+            new_email = row.pending_email
+            exists = (
+                s.query(User.id)
+                .filter(User.email == new_email, User.id != row.id)
+                .first()
+            )
+            if exists is not None:
+                return False, "هذا البريد مستخدم في حساب آخر"
+
+            row.email = new_email
+            row.email_verified = 1
+            row.pending_email = None
+            row.pending_email_token = None
+            row.pending_email_created_at = None
+            s.commit()
+            return True, None
+        except Exception:
+            s.rollback()
+            raise
 
 
 def set_user_balance(user_id, amount):
@@ -889,99 +1290,290 @@ def change_balance(user_id, amount):
 
 
 def upsert_game(provider, game_key, name, emoji="🎮", active=1):
-    with db_conn() as conn:
-        conn.execute("""
-            INSERT INTO games (provider, game_key, name, emoji, active)
-            VALUES (?,?,?,?,?)
-            ON CONFLICT(provider,game_key) DO UPDATE SET
-                name=excluded.name,
-                emoji=excluded.emoji
-        """, (provider, game_key, name, emoji, active))
-        conn.commit()
+    """Insert a game or update its ``name``/``emoji`` if the natural
+    key already exists. ``active`` is set on insert ONLY (legacy
+    behaviour — matches ``ON CONFLICT(...) DO UPDATE SET name, emoji``
+    which omits ``active``).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Kept
+    portable by doing an explicit lookup → update-or-insert (the
+    SQLite-specific ``ON CONFLICT ... DO UPDATE`` syntax is not
+    supported on Postgres without extra work).
+    """
+    from app.db.models import Game
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            row = (
+                s.query(Game)
+                .filter(Game.provider == provider, Game.game_key == game_key)
+                .first()
+            )
+            if row is None:
+                s.add(
+                    Game(
+                        provider=provider,
+                        game_key=game_key,
+                        name=name,
+                        emoji=emoji,
+                        active=active,
+                    )
+                )
+            else:
+                # Legacy ``DO UPDATE SET name=..., emoji=...`` — does NOT
+                # touch ``active`` on conflict. Keep that.
+                row.name = name
+                row.emoji = emoji
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def add_custom_game(provider, game_key, name, emoji="🎮", image_url="", active=1):
-    with db_conn() as conn:
-        conn.execute("""
-            INSERT INTO games (provider, game_key, name, emoji, image_url, active)
-            VALUES (?,?,?,?,?,?)
-            ON CONFLICT(provider,game_key) DO UPDATE SET
-                name=excluded.name,
-                emoji=excluded.emoji,
-                image_url=excluded.image_url,
-                active=excluded.active
-        """, (provider, game_key, name, emoji, image_url, active))
-        conn.commit()
+    """Admin-driven custom game create/update.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Unlike
+    ``upsert_game``, this DOES update ``image_url`` AND ``active`` on
+    conflict — that's the point of the admin "edit game" form.
+    """
+    from app.db.models import Game
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            row = (
+                s.query(Game)
+                .filter(Game.provider == provider, Game.game_key == game_key)
+                .first()
+            )
+            if row is None:
+                s.add(
+                    Game(
+                        provider=provider,
+                        game_key=game_key,
+                        name=name,
+                        emoji=emoji,
+                        image_url=image_url,
+                        active=active,
+                    )
+                )
+            else:
+                row.name = name
+                row.emoji = emoji
+                row.image_url = image_url
+                row.active = active
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def set_game_active(provider, game_key, active):
-    with db_conn() as conn:
-        conn.execute("UPDATE games SET active=? WHERE provider=? AND game_key=?", (1 if active else 0, provider, game_key))
-        conn.commit()
+    """Toggle a game's ``active`` flag.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    ``active`` is coerced to 1/0 (legacy was ``1 if active else 0``).
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Game
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(Game)
+                .where(Game.provider == provider, Game.game_key == game_key)
+                .values(active=1 if active else 0)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 # V55: admin-controlled homepage visibility.
 def set_game_show_on_home(provider, game_key, show):
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE games SET show_on_home=? WHERE provider=? AND game_key=?",
-            (1 if show else 0, provider, game_key),
-        )
-        conn.commit()
+    """Toggle whether a game appears on the public homepage.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Game
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(Game)
+                .where(Game.provider == provider, Game.game_key == game_key)
+                .values(show_on_home=1 if show else 0)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 # V68: ترتيب ظهور اللعبة في الواجهة الرئيسية.
 # 0 = الترتيب الافتراضي (حسب الاسم). أي رقم أكبر من 0 يعطي ترتيبًا يدويًا.
 def set_game_home_sort_order(provider, game_key, sort_order):
+    """Set the homepage display order for a single game.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour:
+
+      * Negative values are clamped to 0 (legacy did the same).
+      * Non-integer / unparseable input falls back to 0.
+      * 0 means "use default order (alphabetical)".
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Game
+    from app.db.session import get_session
+
     try:
         v = int(sort_order or 0)
     except Exception:
         v = 0
     if v < 0:
         v = 0
-    with db_conn() as conn:
-        conn.execute(
-            "UPDATE games SET home_sort_order=? WHERE provider=? AND game_key=?",
-            (v, provider, game_key),
-        )
-        conn.commit()
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(Game)
+                .where(Game.provider == provider, Game.game_key == game_key)
+                .values(home_sort_order=v)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def list_home_games():
-    """Return only games flagged by admin as visible on homepage, with product_count & min_price.
-    Falls back to an empty list; caller decides the fallback policy."""
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT g.*,
-                   COUNT(p.id) AS product_count,
-                   MIN(p.sell_price) AS min_price
-            FROM games g
-            LEFT JOIN products p ON p.provider=g.provider AND p.game_key=g.game_key AND p.active=1
-            WHERE g.active=1 AND g.show_on_home=1
-            GROUP BY g.id
-            ORDER BY CASE WHEN COALESCE(g.home_sort_order,0)=0 THEN 999999 ELSE g.home_sort_order END ASC,
-                     g.name ASC
-        """).fetchall()]
+    """Return only games flagged by admin as visible on homepage,
+    with ``product_count`` & ``min_price``.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The
+    legacy SQL is reproduced exactly:
+
+      * LEFT JOIN against active products (so games with no products
+        still appear with ``product_count = 0`` and ``min_price = None``).
+      * Ordering: ``home_sort_order ASC`` (treating 0 as 999999) then
+        ``name ASC``.
+      * Returns a list of plain dicts. Templates iterate
+        ``g["product_count"]`` and ``g["min_price"]`` directly so the
+        column names MUST stay.
+    """
+    from sqlalchemy import asc, case, func
+
+    from app.db.models import Game, Product
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    sort_key = case(
+        (func.coalesce(Game.home_sort_order, 0) == 0, 999999),
+        else_=Game.home_sort_order,
+    )
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                Game,
+                func.count(Product.id).label("product_count"),
+                func.min(Product.sell_price).label("min_price"),
+            )
+            .outerjoin(
+                Product,
+                (Product.provider == Game.provider)
+                & (Product.game_key == Game.game_key)
+                & (Product.active == 1),
+            )
+            .filter(Game.active == 1, Game.show_on_home == 1)
+            .group_by(Game.id)
+            .order_by(asc(sort_key), Game.name.asc())
+            .all()
+        )
+        out = []
+        for game, product_count, min_price in rows:
+            d = row_to_dict(game)
+            d["product_count"] = product_count
+            d["min_price"] = min_price
+            out.append(d)
+        return out
 
 
 def upsert_product(provider, game_key, provider_product_id, name, base_price, sell_price, active=1):
-    with db_conn() as conn:
-        conn.execute("""
-            INSERT INTO products (provider, game_key, provider_product_id, name, base_price, sell_price, active)
-            VALUES (?,?,?,?,?,?,?)
-            ON CONFLICT(provider, provider_product_id) DO UPDATE SET
-                name=excluded.name,
-                base_price=excluded.base_price,
-                sell_price=excluded.sell_price
-        """, (provider, game_key, str(provider_product_id), name, base_price, sell_price, active))
-        conn.commit()
+    """Insert or update a product by its natural key
+    ``(provider, provider_product_id)``.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Same
+    quirk as ``upsert_game`` — conflict path updates ``name``,
+    ``base_price``, ``sell_price`` but does NOT touch ``active``
+    (legacy ``DO UPDATE`` clause did the same). ``provider_product_id``
+    is forced to a string for safety.
+    """
+    from app.db.models import Product
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            row = (
+                s.query(Product)
+                .filter(
+                    Product.provider == provider,
+                    Product.provider_product_id == str(provider_product_id),
+                )
+                .first()
+            )
+            if row is None:
+                s.add(
+                    Product(
+                        provider=provider,
+                        game_key=game_key,
+                        provider_product_id=str(provider_product_id),
+                        name=name,
+                        base_price=base_price,
+                        sell_price=sell_price,
+                        active=active,
+                    )
+                )
+            else:
+                row.name = name
+                row.base_price = base_price
+                row.sell_price = sell_price
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def delete_products_for_game(provider, game_key):
-    """حذف باقات لعبة محددة قبل إعادة مزامنتها لتجنب بقاء مناطق/باقات قديمة."""
-    with db_conn() as conn:
-        conn.execute("DELETE FROM products WHERE provider=? AND game_key=?", (provider, game_key))
-        conn.commit()
+    """حذف باقات لعبة محددة قبل إعادة مزامنتها لتجنب بقاء مناطق/باقات قديمة.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Used
+    before re-syncing a game's products from the supplier API.
+    """
+    from sqlalchemy import delete
+
+    from app.db.models import Product
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                delete(Product).where(
+                    Product.provider == provider, Product.game_key == game_key
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def list_games(provider=None, only_active=True):
@@ -1045,97 +1637,297 @@ def translate_product_name(name):
 
 
 def list_product_groups(provider, game_key, only_active=True):
-    with db_conn() as conn:
-        q = "SELECT * FROM product_groups WHERE provider=? AND game_key=?"
-        args = [provider, game_key]
+    """List all product groups inside a game.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved:
+
+      * ``only_active=True`` (default) hides admin-disabled groups.
+      * Ordering: ``sort_order ASC`` (treating 0 as 999999) then
+        ``name ASC`` — same CASE expression as the legacy SQL.
+      * Returns a list of plain dicts.
+    """
+    from sqlalchemy import asc, case, func
+
+    from app.db.models import ProductGroup
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    sort_key = case(
+        (func.coalesce(ProductGroup.sort_order, 0) == 0, 999999),
+        else_=ProductGroup.sort_order,
+    )
+
+    with get_session() as s:
+        q = s.query(ProductGroup).filter(
+            ProductGroup.provider == provider,
+            ProductGroup.game_key == game_key,
+        )
         if only_active:
-            q += " AND active=1"
-        q += " ORDER BY CASE WHEN COALESCE(sort_order,0)=0 THEN 999999 ELSE sort_order END ASC, name ASC"
-        return [dict(r) for r in conn.execute(q, args).fetchall()]
+            q = q.filter(ProductGroup.active == 1)
+        return rows_to_dicts(q.order_by(asc(sort_key), ProductGroup.name.asc()).all())
 
 
 def get_product_group(group_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM product_groups WHERE id=?", (int(group_id),)).fetchone()
-        return dict(row) if row else None
+    """Look up a product group by primary key.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. ``group_id``
+    is coerced to ``int`` to match the legacy SQLite implicit cast.
+    """
+    from app.db.models import ProductGroup
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    try:
+        gid = int(group_id)
+    except (TypeError, ValueError):
+        return None
+    with get_session() as s:
+        row = s.get(ProductGroup, gid)
+        return row_to_dict(row) if row is not None else None
 
 
 def create_product_group(provider, game_key, name, image_url="", sort_order=1, active=1):
-    with db_conn() as conn:
-        now = int(time.time())
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT OR IGNORE INTO product_groups (provider, game_key, name, image_url, sort_order, active, created_at)
-            VALUES (?,?,?,?,?,?,?)
-        """, (provider, game_key, str(name or "").strip(), image_url or "", int(sort_order or 1), int(active), now))
-        conn.commit()
-        row = conn.execute("SELECT * FROM product_groups WHERE provider=? AND game_key=? AND name=?", (provider, game_key, str(name or "").strip())).fetchone()
-        return dict(row) if row else None
+    """Create a product group, idempotently — if one already exists
+    with the same ``(provider, game_key, name)`` UNIQUE key, the
+    existing row is returned untouched.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Mirrors
+    legacy ``INSERT OR IGNORE`` then SELECT-back behaviour.
+    """
+    from app.db.models import ProductGroup
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    clean_name = str(name or "").strip()
+    now = int(time.time())
+
+    with get_session() as s:
+        try:
+            row = (
+                s.query(ProductGroup)
+                .filter(
+                    ProductGroup.provider == provider,
+                    ProductGroup.game_key == game_key,
+                    ProductGroup.name == clean_name,
+                )
+                .first()
+            )
+            if row is None:
+                row = ProductGroup(
+                    provider=provider,
+                    game_key=game_key,
+                    name=clean_name,
+                    image_url=image_url or "",
+                    sort_order=int(sort_order or 1),
+                    active=int(active),
+                    created_at=now,
+                )
+                s.add(row)
+                s.commit()
+                # Reload after commit so we get the id.
+                row = (
+                    s.query(ProductGroup)
+                    .filter(
+                        ProductGroup.provider == provider,
+                        ProductGroup.game_key == game_key,
+                        ProductGroup.name == clean_name,
+                    )
+                    .first()
+                )
+            return row_to_dict(row) if row is not None else None
+        except Exception:
+            s.rollback()
+            raise
 
 
 def update_product_group(group_id, name, image_url="", sort_order=1, active=1):
-    with db_conn() as conn:
-        conn.execute("UPDATE product_groups SET name=?, image_url=?, sort_order=?, active=? WHERE id=?", (str(name or "").strip(), image_url or "", int(sort_order or 1), int(active), int(group_id)))
-        conn.commit()
+    """Update every editable field on a product group.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Same
+    "blanket update" semantics as the legacy: callers must pass the
+    full new state, not a partial diff.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import ProductGroup
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(ProductGroup)
+                .where(ProductGroup.id == int(group_id))
+                .values(
+                    name=str(name or "").strip(),
+                    image_url=image_url or "",
+                    sort_order=int(sort_order or 1),
+                    active=int(active),
+                )
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def delete_product_group(group_id):
-    with db_conn() as conn:
-        conn.execute("UPDATE products SET group_id=NULL WHERE group_id=?", (int(group_id),))
-        conn.execute("DELETE FROM product_groups WHERE id=?", (int(group_id),))
-        conn.commit()
+    """Delete a product group, but FIRST detach every product currently
+    in it (set ``products.group_id = NULL``) so the products survive.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Both
+    statements run inside the same transaction so a crash between them
+    cannot leave orphan products pointing to a non-existent group.
+    """
+    from sqlalchemy import delete, update
+
+    from app.db.models import Product, ProductGroup
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            gid = int(group_id)
+            s.execute(
+                update(Product)
+                .where(Product.group_id == gid)
+                .values(group_id=None)
+            )
+            s.execute(delete(ProductGroup).where(ProductGroup.id == gid))
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def update_manual_syp_prices(price_updates):
-    with db_conn() as conn:
-        for product_id, manual_price_syp in price_updates:
-            try:
-                value = float(manual_price_syp or 0)
-            except Exception:
-                value = 0.0
-            conn.execute("UPDATE products SET manual_price_syp=? WHERE id=?", (value, int(product_id)))
-        conn.commit()
+    """Bulk update of ``products.manual_price_syp`` from an admin
+    spreadsheet.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    ``price_updates`` is an iterable of ``(product_id, manual_price_syp)``
+    tuples. Bad / non-numeric values fall back to 0.0 (legacy
+    behaviour). All updates run in one transaction.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Product
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            for product_id, manual_price_syp in price_updates:
+                try:
+                    value = float(manual_price_syp or 0)
+                except Exception:
+                    value = 0.0
+                s.execute(
+                    update(Product)
+                    .where(Product.id == int(product_id))
+                    .values(manual_price_syp=value)
+                )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def update_products_admin(product_updates, usd_syp_rate=15000):
-    with db_conn() as conn:
+    """Bulk admin update of products: sort order, group, pricing mode,
+    fixed-SYP override.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved:
+
+      * ``pricing_mode`` is whitelisted to ``{"usd","auto_syp","fixed_syp"}``;
+        anything else falls back to ``"usd"``.
+      * When ``pricing_mode == "fixed_syp"`` AND a positive
+        ``fixed_syp_price`` AND a positive ``rate`` are all set,
+        ``sell_price`` is recomputed as ``round(fixed_syp_price/rate, 4)``
+        and stored along with the other columns.
+      * Otherwise (legacy "else" branch) ``fixed_syp_price`` is reset
+        to 0 and ``sell_price`` is left untouched.
+      * All updates run in a single transaction.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Product
+    from app.db.session import get_session
+
+    try:
+        rate = float(usd_syp_rate or 15000)
+    except Exception:
+        rate = 15000.0
+
+    with get_session() as s:
         try:
-            rate = float(usd_syp_rate or 15000)
+            for item in product_updates:
+                product_id = int(item["product_id"])
+                sort_order = int(item.get("sort_order") or 0)
+                group_id = int(item["group_id"]) if item.get("group_id") else None
+                pricing_mode = item.get("pricing_mode") or "usd"
+                if pricing_mode not in ("usd", "auto_syp", "fixed_syp"):
+                    pricing_mode = "usd"
+
+                try:
+                    fixed_syp_price = float(item.get("fixed_syp_price") or 0)
+                except Exception:
+                    fixed_syp_price = 0.0
+
+                if pricing_mode == "fixed_syp" and fixed_syp_price > 0 and rate > 0:
+                    sell_price = round(fixed_syp_price / rate, 4)
+                    s.execute(
+                        update(Product)
+                        .where(Product.id == product_id)
+                        .values(
+                            sort_order=sort_order,
+                            group_id=group_id,
+                            pricing_mode=pricing_mode,
+                            fixed_syp_price=fixed_syp_price,
+                            sell_price=sell_price,
+                        )
+                    )
+                else:
+                    s.execute(
+                        update(Product)
+                        .where(Product.id == product_id)
+                        .values(
+                            sort_order=sort_order,
+                            group_id=group_id,
+                            pricing_mode=pricing_mode,
+                            fixed_syp_price=0,
+                        )
+                    )
+            s.commit()
         except Exception:
-            rate = 15000.0
-
-        for item in product_updates:
-            product_id = int(item["product_id"])
-            sort_order = int(item.get("sort_order") or 0)
-            group_id = int(item["group_id"]) if item.get("group_id") else None
-            pricing_mode = item.get("pricing_mode") or "usd"
-            if pricing_mode not in ("usd", "auto_syp", "fixed_syp"):
-                pricing_mode = "usd"
-
-            try:
-                fixed_syp_price = float(item.get("fixed_syp_price") or 0)
-            except Exception:
-                fixed_syp_price = 0.0
-
-            if pricing_mode == "fixed_syp" and fixed_syp_price > 0 and rate > 0:
-                sell_price = round(fixed_syp_price / rate, 4)
-                conn.execute(
-                    "UPDATE products SET sort_order=?, group_id=?, pricing_mode=?, fixed_syp_price=?, sell_price=? WHERE id=?",
-                    (sort_order, group_id, pricing_mode, fixed_syp_price, sell_price, product_id)
-                )
-            else:
-                conn.execute(
-                    "UPDATE products SET sort_order=?, group_id=?, pricing_mode=?, fixed_syp_price=? WHERE id=?",
-                    (sort_order, group_id, pricing_mode, 0, product_id)
-                )
-        conn.commit()
+            s.rollback()
+            raise
 
 
 def update_game_pricing(provider, game_key, pricing_currency):
+    """Set per-game pricing currency (``GLOBAL`` / ``USD`` / ``SYP``).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Any value
+    outside the whitelist falls back to ``"GLOBAL"`` (legacy guard
+    preserved).
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Game
+    from app.db.session import get_session
+
     value = pricing_currency if pricing_currency in ("GLOBAL", "USD", "SYP") else "GLOBAL"
-    with db_conn() as conn:
-        conn.execute("UPDATE games SET pricing_currency=? WHERE provider=? AND game_key=?", (value, provider, game_key))
-        conn.commit()
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(Game)
+                .where(Game.provider == provider, Game.game_key == game_key)
+                .values(pricing_currency=value)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def list_products(provider, game_key, only_active=True, group_id=None):
@@ -1238,104 +2030,306 @@ def list_products(provider, game_key, only_active=True, group_id=None):
 
 
 def list_public_product_groups_for_home():
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT pg.*,
-                   g.name AS game_name,
-                   g.emoji AS game_emoji,
-                   g.image_url AS game_image_url,
-                   COUNT(p.id) AS product_count,
-                   MIN(p.sell_price) AS min_price
-            FROM product_groups pg
-            JOIN games g ON g.provider=pg.provider AND g.game_key=pg.game_key
-            LEFT JOIN products p ON p.provider=pg.provider AND p.game_key=pg.game_key AND p.group_id=pg.id AND p.active=1
-            WHERE pg.active=1 AND g.active=1
-            GROUP BY pg.id
-            ORDER BY CASE WHEN COALESCE(pg.sort_order,0)=0 THEN 999999 ELSE pg.sort_order END ASC, g.name ASC, pg.name ASC
-        """).fetchall()]
+    """Return product groups for the homepage carousel.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved exactly:
+
+      * Inner JOIN against ``games`` so groups whose linked game was
+        deleted disappear (legacy ``JOIN games g ON ...``).
+      * LEFT JOIN against products filtered to ``active=1`` AND the
+        same group_id, so ``product_count`` counts only the active
+        products in this specific group.
+      * WHERE ``pg.active = 1 AND g.active = 1`` (both must be live).
+      * Ordering: ``pg.sort_order`` (CASE 0 → 999999) → ``g.name`` →
+        ``pg.name``.
+      * Result rows include the joined columns ``game_name``,
+        ``game_emoji``, ``game_image_url`` plus the aggregates.
+    """
+    from sqlalchemy import asc, case, func
+
+    from app.db.models import Game, Product, ProductGroup
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    sort_key = case(
+        (func.coalesce(ProductGroup.sort_order, 0) == 0, 999999),
+        else_=ProductGroup.sort_order,
+    )
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                ProductGroup,
+                Game.name.label("game_name"),
+                Game.emoji.label("game_emoji"),
+                Game.image_url.label("game_image_url"),
+                func.count(Product.id).label("product_count"),
+                func.min(Product.sell_price).label("min_price"),
+            )
+            .join(
+                Game,
+                (Game.provider == ProductGroup.provider)
+                & (Game.game_key == ProductGroup.game_key),
+            )
+            .outerjoin(
+                Product,
+                (Product.provider == ProductGroup.provider)
+                & (Product.game_key == ProductGroup.game_key)
+                & (Product.group_id == ProductGroup.id)
+                & (Product.active == 1),
+            )
+            .filter(ProductGroup.active == 1, Game.active == 1)
+            .group_by(ProductGroup.id)
+            .order_by(asc(sort_key), Game.name.asc(), ProductGroup.name.asc())
+            .all()
+        )
+        out = []
+        for pg, game_name, game_emoji, game_image_url, product_count, min_price in rows:
+            d = row_to_dict(pg)
+            d["game_name"] = game_name
+            d["game_emoji"] = game_emoji
+            d["game_image_url"] = game_image_url
+            d["product_count"] = product_count
+            d["min_price"] = min_price
+            out.append(d)
+        return out
 
 
 def list_public_games(only_active=True):
-    with db_conn() as conn:
-        q = """
-            SELECT g.*,
-                   COUNT(p.id) AS product_count,
-                   MIN(p.sell_price) AS min_price
-            FROM games g
-            LEFT JOIN products p ON p.provider=g.provider AND p.game_key=g.game_key AND p.active=1
-            WHERE 1=1
-        """
-        args = []
+    """Return games for the public catalog with product counts and
+    minimum prices.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Preserves
+    the LEFT JOIN against active products so games with zero packs
+    still appear (with ``product_count=0`` and ``min_price=None``).
+    Ordering: ``active DESC, name ASC``.
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Game, Product
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        q = s.query(
+            Game,
+            func.count(Product.id).label("product_count"),
+            func.min(Product.sell_price).label("min_price"),
+        ).outerjoin(
+            Product,
+            (Product.provider == Game.provider)
+            & (Product.game_key == Game.game_key)
+            & (Product.active == 1),
+        )
         if only_active:
-            q += " AND g.active=1"
-        q += " GROUP BY g.id ORDER BY g.active DESC, g.name ASC"
-        return [dict(r) for r in conn.execute(q, args).fetchall()]
+            q = q.filter(Game.active == 1)
+        q = q.group_by(Game.id).order_by(Game.active.desc(), Game.name.asc())
+
+        out = []
+        for game, product_count, min_price in q.all():
+            d = row_to_dict(game)
+            d["product_count"] = product_count
+            d["min_price"] = min_price
+            out.append(d)
+        return out
 
 
 def list_all_game_groups():
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT g.*,
-                   COUNT(p.id) AS product_count,
-                   MIN(p.sell_price) AS min_price
-            FROM games g
-            LEFT JOIN products p ON p.provider=g.provider AND p.game_key=g.game_key
-            GROUP BY g.id
-            ORDER BY g.provider, g.name
-        """).fetchall()]
+    """Admin view: list every game with product counts and min prices,
+    INCLUDING inactive games AND inactive products.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Differs
+    from ``list_public_games`` in that the LEFT JOIN does NOT filter
+    on ``products.active`` — admins want to see hidden inventory too.
+    Ordering: ``provider, name`` (legacy).
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Game, Product
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                Game,
+                func.count(Product.id).label("product_count"),
+                func.min(Product.sell_price).label("min_price"),
+            )
+            .outerjoin(
+                Product,
+                (Product.provider == Game.provider)
+                & (Product.game_key == Game.game_key),
+            )
+            .group_by(Game.id)
+            .order_by(Game.provider.asc(), Game.name.asc())
+            .all()
+        )
+        out = []
+        for game, product_count, min_price in rows:
+            d = row_to_dict(game)
+            d["product_count"] = product_count
+            d["min_price"] = min_price
+            out.append(d)
+        return out
 
 
 def list_product_games_from_products():
-    """اكتشاف ألعاب موجودة في جدول المنتجات حتى لو لم تظهر في جدول games."""
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT provider, game_key, COUNT(*) AS product_count, MIN(sell_price) AS min_price
-            FROM products
-            GROUP BY provider, game_key
-            ORDER BY provider, game_key
-        """).fetchall()]
+    """اكتشاف ألعاب موجودة في جدول المنتجات حتى لو لم تظهر في جدول games.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Used by
+    the admin "fix orphan products" tool to find ``(provider,
+    game_key)`` tuples that exist in ``products`` but have no row in
+    ``games``.
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Product
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                Product.provider,
+                Product.game_key,
+                func.count(Product.id).label("product_count"),
+                func.min(Product.sell_price).label("min_price"),
+            )
+            .group_by(Product.provider, Product.game_key)
+            .order_by(Product.provider.asc(), Product.game_key.asc())
+            .all()
+        )
+        return [
+            {
+                "provider": r.provider,
+                "game_key": r.game_key,
+                "product_count": r.product_count,
+                "min_price": r.min_price,
+            }
+            for r in rows
+        ]
 
 
 def accounting_summary():
-    with db_conn() as conn:
-        total_sales = conn.execute("SELECT COALESCE(SUM(price),0) s FROM orders WHERE status='completed'").fetchone()["s"]
-        total_cost = conn.execute("""
-            SELECT COALESCE(SUM(p.base_price),0) s
-            FROM orders o
-            LEFT JOIN products p ON p.id=o.product_id
-            WHERE o.status='completed'
-        """).fetchone()["s"]
+    """Admin accounting dashboard: total sales, cost, profit, by-game
+    breakdown, and last 100 completed orders.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved bit-for-bit:
+
+      * All four numeric aggregates are computed in their own
+        sub-queries (``COALESCE(SUM(...), 0)``).
+      * ``cost`` joins ``orders.product_id`` against the now-stale
+        product row — historical orders may reference deleted products,
+        in which case ``COALESCE(p.base_price, 0)`` makes them count
+        as zero-cost (no cost data) — same as legacy.
+      * ``by_game`` groups by the snapshotted ``orders.game_name`` (NOT
+        the live ``games.name``) so historical reports stay stable
+        even if the game is renamed.
+      * ``recent`` returns the last 100 completed orders with
+        per-row cost + profit + the buyer's email.
+      * ``sales_override`` setting (admin-tuned display total) overrides
+        the visible ``sales`` value but NOT the underlying ``sales``
+        field; both are returned so templates can render either.
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Order, Product, User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        total_sales = (
+            s.query(func.coalesce(func.sum(Order.price), 0))
+            .filter(Order.status == "completed")
+            .scalar()
+        )
+        total_cost = (
+            s.query(func.coalesce(func.sum(Product.base_price), 0))
+            .select_from(Order)
+            .outerjoin(Product, Product.id == Order.product_id)
+            .filter(Order.status == "completed")
+            .scalar()
+        )
         total_profit = float(total_sales or 0) - float(total_cost or 0)
-        orders_count = conn.execute("SELECT COUNT(*) c FROM orders WHERE status='completed'").fetchone()["c"]
+        orders_count = (
+            s.query(func.count(Order.id))
+            .filter(Order.status == "completed")
+            .scalar()
+        )
 
-        by_game = [dict(r) for r in conn.execute("""
-            SELECT o.game_name,
-                   COUNT(*) AS orders_count,
-                   COALESCE(SUM(o.price),0) AS sales,
-                   COALESCE(SUM(p.base_price),0) AS cost,
-                   COALESCE(SUM(o.price - COALESCE(p.base_price,0)),0) AS profit
-            FROM orders o
-            LEFT JOIN products p ON p.id=o.product_id
-            WHERE o.status='completed'
-            GROUP BY o.game_name
-            ORDER BY profit DESC
-        """).fetchall()]
+        by_game_rows = (
+            s.query(
+                Order.game_name.label("game_name"),
+                func.count().label("orders_count"),
+                func.coalesce(func.sum(Order.price), 0).label("sales"),
+                func.coalesce(func.sum(Product.base_price), 0).label("cost"),
+                func.coalesce(
+                    func.sum(Order.price - func.coalesce(Product.base_price, 0)), 0
+                ).label("profit"),
+            )
+            .select_from(Order)
+            .outerjoin(Product, Product.id == Order.product_id)
+            .filter(Order.status == "completed")
+            .group_by(Order.game_name)
+            .order_by(func.coalesce(
+                func.sum(Order.price - func.coalesce(Product.base_price, 0)), 0
+            ).desc())
+            .all()
+        )
+        by_game = [
+            {
+                "game_name": r.game_name,
+                "orders_count": r.orders_count,
+                "sales": r.sales,
+                "cost": r.cost,
+                "profit": r.profit,
+            }
+            for r in by_game_rows
+        ]
 
-        recent = [dict(r) for r in conn.execute("""
-            SELECT o.id, o.order_code, o.game_name, o.product_name, o.price,
-                   COALESCE(p.base_price,0) AS cost,
-                   (o.price - COALESCE(p.base_price,0)) AS profit,
-                   o.created_at, u.email AS user_email
-            FROM orders o
-            LEFT JOIN products p ON p.id=o.product_id
-            LEFT JOIN users u ON u.id=o.user_id
-            WHERE o.status='completed'
-            ORDER BY o.id DESC
-            LIMIT 100
-        """).fetchall()]
+        recent_rows = (
+            s.query(
+                Order.id.label("id"),
+                Order.order_code.label("order_code"),
+                Order.game_name.label("game_name"),
+                Order.product_name.label("product_name"),
+                Order.price.label("price"),
+                func.coalesce(Product.base_price, 0).label("cost"),
+                (Order.price - func.coalesce(Product.base_price, 0)).label("profit"),
+                Order.created_at.label("created_at"),
+                User.email.label("user_email"),
+            )
+            .select_from(Order)
+            .outerjoin(Product, Product.id == Order.product_id)
+            .outerjoin(User, User.id == Order.user_id)
+            .filter(Order.status == "completed")
+            .order_by(Order.id.desc())
+            .limit(100)
+            .all()
+        )
+        recent = [
+            {
+                "id": r.id,
+                "order_code": r.order_code,
+                "game_name": r.game_name,
+                "product_name": r.product_name,
+                "price": r.price,
+                "cost": r.cost,
+                "profit": r.profit,
+                "created_at": r.created_at,
+                "user_email": r.user_email,
+            }
+            for r in recent_rows
+        ]
+
     sales_override_raw = get_setting("sales_override", "")
     try:
-        sales_override = float(sales_override_raw) if str(sales_override_raw).strip() != "" else None
+        sales_override = (
+            float(sales_override_raw)
+            if str(sales_override_raw).strip() != ""
+            else None
+        )
     except Exception:
         sales_override = None
     display_sales = sales_override if sales_override is not None else total_sales
@@ -1381,10 +2375,25 @@ def get_product(product_id):
 
 def get_product_by_id(product_id):
     """V48: fetch a product by internal DB id even if inactive.
-    Used by RQ worker when re-resolving an order's product to send to supplier."""
-    with db_conn() as conn:
-        row = conn.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone()
-        return dict(row) if row else None
+    Used by RQ worker when re-resolving an order's product to send to
+    supplier.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Differs
+    from :func:`get_product` in that this DOES return inactive
+    products — the RQ worker has to be able to re-send a queued
+    order even if admin has just disabled the product.
+    """
+    from app.db.models import Product
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    try:
+        pid = int(product_id)
+    except (TypeError, ValueError):
+        return None
+    with get_session() as s:
+        row = s.get(Product, pid)
+        return row_to_dict(row) if row is not None else None
 
 
 def get_game(provider, game_key):
@@ -1703,76 +2712,296 @@ def get_order(order_id):
 
 
 def stats():
-    with db_conn() as conn:
-        return {
-            "users": conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"],
-            "orders": conn.execute("SELECT COUNT(*) c FROM orders").fetchone()["c"],
-            "processing": conn.execute("SELECT COUNT(*) c FROM orders WHERE status='processing'").fetchone()["c"],
-            "completed": conn.execute("SELECT COUNT(*) c FROM orders WHERE status='completed'").fetchone()["c"],
-            "pending": conn.execute("SELECT COUNT(*) c FROM orders WHERE status='pending'").fetchone()["c"],
-            "revenue": conn.execute("SELECT COALESCE(SUM(price),0) s FROM orders WHERE status='completed'").fetchone()["s"],
-        }
+    """Admin dashboard stats: user count, order counts by status, revenue.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Returns a
+    dict with the same six keys the legacy SQL produced. Note that
+    the legacy code summed ALL completed orders for ``revenue``
+    (no time window) — we keep that.
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Order, User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        users = s.query(func.count(User.id)).scalar() or 0
+        orders = s.query(func.count(Order.id)).scalar() or 0
+        processing = (
+            s.query(func.count(Order.id))
+            .filter(Order.status == "processing")
+            .scalar()
+        ) or 0
+        completed = (
+            s.query(func.count(Order.id))
+            .filter(Order.status == "completed")
+            .scalar()
+        ) or 0
+        pending = (
+            s.query(func.count(Order.id))
+            .filter(Order.status == "pending")
+            .scalar()
+        ) or 0
+        revenue = (
+            s.query(func.coalesce(func.sum(Order.price), 0))
+            .filter(Order.status == "completed")
+            .scalar()
+        ) or 0
+    return {
+        "users": users,
+        "orders": orders,
+        "processing": processing,
+        "completed": completed,
+        "pending": pending,
+        "revenue": revenue,
+    }
 
 
 def list_users():
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT id,name,email,phone,role,balance,active,email_verified,created_at FROM users ORDER BY id DESC").fetchall()]
+    """Admin "all users" list (no filter, no cap).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The legacy
+    SELECT was a narrow projection (only 9 columns out of ~25) — we
+    keep that to avoid leaking sensitive fields like ``password_hash``,
+    ``totp_secret``, or pending-email tokens to the admin template.
+    Order: ``id DESC``.
+    """
+    from app.db.models import User
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(
+                User.id,
+                User.name,
+                User.email,
+                User.phone,
+                User.role,
+                User.balance,
+                User.active,
+                User.email_verified,
+                User.created_at,
+            )
+            .order_by(User.id.desc())
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "name": r.name,
+                "email": r.email,
+                "phone": r.phone,
+                "role": r.role,
+                "balance": r.balance,
+                "active": r.active,
+                "email_verified": r.email_verified,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
 
 
 def search_users(q=None):
-    with db_conn() as conn:
+    """Admin user search across name / email / phone / order.player_id /
+    optional numeric id.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved exactly:
+
+      * Special LIKE wildcards in ``q`` are escaped via ``_escape_like``.
+      * ``q`` is matched case-sensitively against name/email/phone
+        AND against ``orders.player_id`` (so an admin can find the
+        buyer for a given player_id).
+      * If ``q`` parses as an int, an extra ``users.id == int(q)`` OR
+        clause is added.
+      * Result is DISTINCT (to avoid duplicates from the order JOIN).
+      * Cap: 300 rows. Order: ``id DESC``.
+      * No-query branch: same projection, 300-row cap, ``id DESC``.
+    """
+    from sqlalchemy import or_
+
+    from app.db.models import Order, User
+    from app.db.session import get_session
+
+    user_cols = (
+        User.id, User.name, User.email, User.phone, User.role,
+        User.balance, User.active, User.email_verified, User.created_at,
+    )
+
+    with get_session() as s:
         if q:
             like = f"%{_escape_like(q)}%"
-            args = [like, like, like]
-            extra_ids = []
+            extra_id = None
             if str(q).isdigit():
-                extra_ids.append(int(q))
-            # B608 suppressed: only a STATIC fragment (" OR u.id=?") may be
-            # appended below; all user input is bound via parameters.
-            _sql = (
-                "SELECT DISTINCT u.id,u.name,u.email,u.phone,u.role,u.balance,"
-                "u.active,u.email_verified,u.created_at "
-                "FROM users u "
-                "LEFT JOIN orders o ON o.user_id=u.id "
-                "WHERE u.name LIKE ? ESCAPE '\\' OR u.email LIKE ? ESCAPE '\\' OR u.phone LIKE ? ESCAPE '\\' "
-                "OR o.player_id LIKE ? ESCAPE '\\'"
-                + (" OR u.id=?" if extra_ids else "")
-                + " ORDER BY u.id DESC LIMIT 300"
+                try:
+                    extra_id = int(q)
+                except Exception:
+                    extra_id = None
+
+            conditions = [
+                User.name.like(like, escape="\\"),
+                User.email.like(like, escape="\\"),
+                User.phone.like(like, escape="\\"),
+                Order.player_id.like(like, escape="\\"),
+            ]
+            if extra_id is not None:
+                conditions.append(User.id == extra_id)
+
+            rows = (
+                s.query(*user_cols)
+                .outerjoin(Order, Order.user_id == User.id)
+                .filter(or_(*conditions))
+                .distinct()
+                .order_by(User.id.desc())
+                .limit(300)
+                .all()
             )
-            return [dict(r) for r in conn.execute(_sql, args + [like] + extra_ids).fetchall()]  # nosec B608
         else:
-            return [dict(r) for r in conn.execute("SELECT id,name,email,phone,role,balance,active,email_verified,created_at FROM users ORDER BY id DESC LIMIT 300").fetchall()]
+            rows = (
+                s.query(*user_cols)
+                .order_by(User.id.desc())
+                .limit(300)
+                .all()
+            )
+
+        return [
+            {
+                "id": r.id,
+                "name": r.name,
+                "email": r.email,
+                "phone": r.phone,
+                "role": r.role,
+                "balance": r.balance,
+                "active": r.active,
+                "email_verified": r.email_verified,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
 
 
 def get_user_by_id(user_id):
-    with db_conn() as conn:
-        row = conn.execute("SELECT id,name,email,phone,role,balance,active,email_verified,created_at FROM users WHERE id=?", (int(user_id),)).fetchone()
-        return dict(row) if row else None
+    """Admin "view user" page lookup. Same narrow projection as
+    :func:`list_users` — does NOT leak ``password_hash`` / TOTP fields.
 
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. ``user_id``
+    is coerced to ``int``; bad input raises ``ValueError`` (same as
+    legacy ``int(user_id)``).
+    """
+    from app.db.models import User
+    from app.db.session import get_session
 
-def user_financial_summary(user_id):
-    # V49-HOTFIX: the previous version used SUM(amount) which was WRONG because
-    # `amount` is in the deposit method's native currency (SYP or USD) — so a
-    # user with a 5000 SYP deposit and a 10 USD deposit had a reported total
-    # of 5010, mixing two unrelated currencies. Always sum `amount_usd` so the
-    # total is expressed in a single unit (USD internally, then rendered by
-    # wallet_money in the template).
-    with db_conn() as conn:
+    with get_session() as s:
+        row = (
+            s.query(
+                User.id,
+                User.name,
+                User.email,
+                User.phone,
+                User.role,
+                User.balance,
+                User.active,
+                User.email_verified,
+                User.created_at,
+            )
+            .filter(User.id == int(user_id))
+            .first()
+        )
+        if row is None:
+            return None
         return {
-            "deposits_count": conn.execute("SELECT COUNT(*) c FROM deposits WHERE user_id=?", (user_id,)).fetchone()["c"],
-            "deposits_approved": conn.execute("SELECT COUNT(*) c FROM deposits WHERE user_id=? AND status='approved'", (user_id,)).fetchone()["c"],
-            "deposits_total_paid": conn.execute(
-                "SELECT COALESCE(SUM(COALESCE(amount_usd, 0)),0) s "
-                "FROM deposits WHERE user_id=? AND status='approved'", (user_id,)
-            ).fetchone()["s"],
-            "orders_count": conn.execute("SELECT COUNT(*) c FROM orders WHERE user_id=?", (user_id,)).fetchone()["c"],
-            "orders_total": conn.execute("SELECT COALESCE(SUM(price),0) s FROM orders WHERE user_id=?", (user_id,)).fetchone()["s"],
+            "id": row.id,
+            "name": row.name,
+            "email": row.email,
+            "phone": row.phone,
+            "role": row.role,
+            "balance": row.balance,
+            "active": row.active,
+            "email_verified": row.email_verified,
+            "created_at": row.created_at,
         }
 
 
+def user_financial_summary(user_id):
+    """V49-HOTFIX: per-user accounting summary (deposits + orders).
+
+    The previous version used SUM(amount) which was WRONG because
+    ``amount`` is in the deposit method's native currency (SYP or
+    USD) — so a user with a 5000 SYP deposit and a 10 USD deposit
+    had a reported total of 5010, mixing two unrelated currencies.
+    Always sum ``amount_usd`` so the total is expressed in a single
+    unit (USD internally, then rendered by ``wallet_money`` in the
+    template).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The
+    aggregate set + ``COALESCE(SUM(COALESCE(amount_usd, 0)), 0)``
+    nesting is preserved.
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Deposit, Order
+    from app.db.session import get_session
+
+    with get_session() as s:
+        deposits_count = (
+            s.query(func.count(Deposit.id))
+            .filter(Deposit.user_id == user_id)
+            .scalar()
+        ) or 0
+        deposits_approved = (
+            s.query(func.count(Deposit.id))
+            .filter(Deposit.user_id == user_id, Deposit.status == "approved")
+            .scalar()
+        ) or 0
+        deposits_total_paid = (
+            s.query(
+                func.coalesce(
+                    func.sum(func.coalesce(Deposit.amount_usd, 0)), 0
+                )
+            )
+            .filter(Deposit.user_id == user_id, Deposit.status == "approved")
+            .scalar()
+        ) or 0
+        orders_count = (
+            s.query(func.count(Order.id))
+            .filter(Order.user_id == user_id)
+            .scalar()
+        ) or 0
+        orders_total = (
+            s.query(func.coalesce(func.sum(Order.price), 0))
+            .filter(Order.user_id == user_id)
+            .scalar()
+        ) or 0
+
+    return {
+        "deposits_count": deposits_count,
+        "deposits_approved": deposits_approved,
+        "deposits_total_paid": deposits_total_paid,
+        "orders_count": orders_count,
+        "orders_total": orders_total,
+    }
+
+
 def list_user_deposits_admin(user_id):
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 300", (int(user_id),)).fetchall()]
+    """Admin view: a single user's deposits (any status), capped at 300.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Uses the
+    full ``deposits`` column set so admins can see ``proof_filename``,
+    ``amount_usd``, ``currency``, etc.
+    """
+    from app.db.models import Deposit
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(Deposit)
+            .filter(Deposit.user_id == int(user_id))
+            .order_by(Deposit.id.desc())
+            .limit(300)
+            .all()
+        )
+        return rows_to_dicts(rows)
 
 
 # --- Payment Methods & Deposits ---
@@ -1840,16 +3069,26 @@ def update_payment_method(method_id, name=None, emoji=None, address=None, instru
 def can_download_proof(user_id: int, is_admin: bool, filename: str) -> bool:
     """V53: IDOR fix — verify proof ownership via DB, not filename prefix.
 
-    Admins can download any proof. Regular users can only download proofs
-    that are linked to one of their own deposits (proof_filename column).
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Admins can
+    download any proof. Regular users can only download proofs that
+    are linked to one of their own deposits via ``proof_filename``.
+    Returns ``False`` for non-admin lookups against a filename that
+    doesn't match — never raises (legacy did not raise either).
     """
     if is_admin:
         return True
-    with db_conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM deposits WHERE user_id=? AND proof_filename=? LIMIT 1",
-            (user_id, filename),
-        ).fetchone()
+    from app.db.models import Deposit
+    from app.db.session import get_session
+
+    with get_session() as s:
+        row = (
+            s.query(Deposit.id)
+            .filter(
+                Deposit.user_id == user_id,
+                Deposit.proof_filename == filename,
+            )
+            .first()
+        )
     return row is not None
 
 
@@ -2114,98 +3353,237 @@ def update_deposit(deposit_id, status):
 
 
 def list_orders_for_auto_refresh():
-    """طلبات لديها رقم طلب مورد وتحتاج تحديث حالة."""
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("""
-            SELECT * FROM orders
-            WHERE status IN ('supplier_pending','processing')
-              AND provider_order_id IS NOT NULL
-              AND provider_order_id != ''
-            ORDER BY id ASC
-            LIMIT 100
-        """).fetchall()]
+    """طلبات لديها رقم طلب مورد وتحتاج تحديث حالة.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Returns
+    every order in ``supplier_pending`` or ``processing`` that has a
+    non-empty ``provider_order_id``, capped at 100. Used by the RQ
+    auto-refresh task to poll the supplier for status changes.
+    """
+    from app.db.models import Order
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(Order)
+            .filter(
+                Order.status.in_(["supplier_pending", "processing"]),
+                Order.provider_order_id.isnot(None),
+                Order.provider_order_id != "",
+            )
+            .order_by(Order.id.asc())
+            .limit(100)
+            .all()
+        )
+        return rows_to_dicts(rows)
 
 
 def get_order_public(order_id, user_id=None):
-    # V50 SECURITY (CC): previously `user_id=None` would return the order
-    # regardless of ownership — a latent IDOR if any caller forgot to pass
-    # user_id. Require an explicit owner id (or admin sentinel) to look up.
-    # Pass user_id="*" from admin code paths when cross-user access is
-    # intentionally required.
+    """V50 SECURITY (CC) — explicit ownership lookup for orders.
+
+    Previously ``user_id=None`` would return the order regardless of
+    ownership — a latent IDOR if any caller forgot to pass ``user_id``.
+    Now requires an explicit owner id (or admin sentinel ``"*"``).
+    Pass ``user_id="*"`` from admin code paths when cross-user access
+    is intentionally required.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The ``"*"``
+    sentinel and the ``ValueError`` on ``None`` are preserved.
+    """
     if user_id is None:
-        raise ValueError("get_order_public requires an explicit user_id; "
-                         "use user_id='*' for admin access")
-    with db_conn() as conn:
+        raise ValueError(
+            "get_order_public requires an explicit user_id; "
+            "use user_id='*' for admin access"
+        )
+    from app.db.models import Order
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
         if user_id == "*":
-            row = conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+            row = s.query(Order).filter(Order.id == order_id).first()
         else:
-            row = conn.execute("SELECT * FROM orders WHERE id=? AND user_id=?", (order_id, user_id)).fetchone()
-        return dict(row) if row else None
+            row = (
+                s.query(Order)
+                .filter(Order.id == order_id, Order.user_id == user_id)
+                .first()
+            )
+        return row_to_dict(row) if row is not None else None
 
 
 def update_game_image(provider, game_key, image_url):
-    with db_conn() as conn:
-        conn.execute("UPDATE games SET image_url=? WHERE provider=? AND game_key=?", (image_url, provider, game_key))
-        conn.commit()
+    """Set ``games.image_url`` for a single game.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Game
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            s.execute(
+                update(Game)
+                .where(Game.provider == provider, Game.game_key == game_key)
+                .values(image_url=image_url)
+            )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def list_all_games_for_admin():
-    with db_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM games ORDER BY provider, name").fetchall()]
+    """Admin "all games" list — every row, including inactive.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Order is
+    ``provider, name`` (legacy). Returns full ``games`` column set.
+    """
+    from app.db.models import Game
+    from app.db.orm_helpers import rows_to_dicts
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(Game)
+            .order_by(Game.provider.asc(), Game.name.asc())
+            .all()
+        )
+        return rows_to_dicts(rows)
 
 
 def list_all_products_for_admin(provider, game_key):
-    with db_conn() as conn:
-        rows = [dict(r) for r in conn.execute("""
-            SELECT p.*, g.name AS group_name
-            FROM products p
-            LEFT JOIN product_groups g ON p.group_id=g.id
-            WHERE p.provider=? AND p.game_key=?
-            ORDER BY COALESCE(p.group_id,0), p.sort_order ASC, p.sell_price ASC, p.id ASC
-        """, (provider, game_key)).fetchall()]
-        for row in rows:
-            row["display_name"] = translate_product_name(row.get("name"))
-        return rows
+    """Admin "edit products" page: every product (active or not) for a
+    specific game, with a JOIN against ``product_groups`` to surface
+    the group name in the same row.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Behaviour
+    preserved exactly:
+
+      * LEFT JOIN against product_groups so products with no group
+        still appear (with ``group_name = None``).
+      * Order: ``COALESCE(group_id, 0)``, then ``sort_order ASC``,
+        then ``sell_price ASC``, then ``id ASC``.
+      * Each row gets a Python-computed ``display_name`` field
+        (Arabic-translated ``name``).
+    """
+    from sqlalchemy import func
+
+    from app.db.models import Product, ProductGroup
+    from app.db.orm_helpers import row_to_dict
+    from app.db.session import get_session
+
+    with get_session() as s:
+        rows = (
+            s.query(Product, ProductGroup.name.label("group_name"))
+            .outerjoin(ProductGroup, Product.group_id == ProductGroup.id)
+            .filter(Product.provider == provider, Product.game_key == game_key)
+            .order_by(
+                func.coalesce(Product.group_id, 0).asc(),
+                Product.sort_order.asc(),
+                Product.sell_price.asc(),
+                Product.id.asc(),
+            )
+            .all()
+        )
+        out = []
+        for product, group_name in rows:
+            d = row_to_dict(product)
+            d["group_name"] = group_name
+            d["display_name"] = translate_product_name(d.get("name"))
+            out.append(d)
+        return out
 
 
 def update_product_sort_orders(order_pairs):
-    with db_conn() as conn:
-        for product_id, sort_order in order_pairs:
-            conn.execute("UPDATE products SET sort_order=? WHERE id=?", (int(sort_order), int(product_id)))
-        conn.commit()
+    """Bulk update of ``products.sort_order`` from the admin drag-drop UI.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. ``order_pairs``
+    is an iterable of ``(product_id, sort_order)`` tuples. All updates
+    run in a single transaction.
+    """
+    from sqlalchemy import update
+
+    from app.db.models import Product
+    from app.db.session import get_session
+
+    with get_session() as s:
+        try:
+            for product_id, sort_order in order_pairs:
+                s.execute(
+                    update(Product)
+                    .where(Product.id == int(product_id))
+                    .values(sort_order=int(sort_order))
+                )
+            s.commit()
+        except Exception:
+            s.rollback()
+            raise
 
 
 def update_profit_margin(margin):
+    """Apply the new profit margin to ALL products immediately.
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. The legacy
+    bug this fixes (and which we keep fixed):
+
+      * Products with ``pricing_mode='fixed_syp'`` would otherwise keep
+        their fixed_syp_price and recompute sell_price from that,
+        ignoring the new margin → reset to ``pricing_mode='usd'`` +
+        ``fixed_syp_price=0``.
+      * Products with ``manual_price_syp > 0`` (when manual editing
+        was on) would use the manual SYP price instead of the
+        margin-based USD sell_price → reset ``manual_price_syp=0``.
+
+    All four operations run in a single transaction. The ``sell_price``
+    recompute walks every product in Python and sets the new value
+    (instead of an SQL-side ``ROUND(base_price * ?, 2)``) because
+    ``round(double precision, integer)`` is not a valid Postgres
+    function — Postgres only defines ``round(numeric, integer)``.
+    Recomputing in Python keeps this portable across SQLite and
+    Postgres without an explicit cast. The cost is one row pull per
+    product, but the SQLAlchemy session batches every UPDATE into a
+    single commit, so the wire round-trip count is small.
     """
-    Apply the new profit margin to ALL products immediately.
-    This previously failed to take effect because:
-      - products with pricing_mode='fixed_syp' kept their fixed_syp_price
-        and recomputed sell_price from that, ignoring the new margin.
-      - products with manual_price_syp > 0 (when manual editing was on) used
-        the manual SYP price instead of the margin-based USD sell_price.
-    To make "save margin" actually update prices everywhere, we now reset
-    those overrides as part of the operation.
-    """
+    from sqlalchemy import update
+
+    from app.db.models import Product, Setting
+    from app.db.session import get_session
+
     margin = float(margin)
-    with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)",
-                    ("profit_margin", str(margin)))
-        # Recompute sell_price for every product from its base cost.
-        cur.execute("UPDATE products SET sell_price = ROUND(COALESCE(base_price,0) * ?, 2)",
-                    (margin,))
-        # Drop fixed-SYP overrides so the new margin is what the user sees.
+    with get_session() as s:
         try:
-            cur.execute("UPDATE products SET pricing_mode='usd', fixed_syp_price=0 "
-                        "WHERE pricing_mode='fixed_syp'")
+            # 1. Persist the new margin into settings.
+            row = s.get(Setting, "profit_margin")
+            if row is None:
+                s.add(Setting(key="profit_margin", value=str(margin)))
+            else:
+                row.value = str(margin)
+
+            # 2. Recompute every product's sell_price from base_price.
+            for p in s.query(Product).all():
+                p.sell_price = round((p.base_price or 0) * margin, 2)
+
+            # 3. Drop fixed-SYP overrides.
+            s.execute(
+                update(Product)
+                .where(Product.pricing_mode == "fixed_syp")
+                .values(pricing_mode="usd", fixed_syp_price=0)
+            )
+
+            # 4. Drop manual SYP price overrides.
+            s.execute(
+                update(Product)
+                .where(Product.manual_price_syp > 0)
+                .values(manual_price_syp=0)
+            )
+
+            s.commit()
         except Exception:
-            pass
-        # Drop manual SYP price overrides; they would otherwise hide the margin.
-        try:
-            cur.execute("UPDATE products SET manual_price_syp=0 WHERE manual_price_syp>0")
-        except Exception:
-            pass
-        conn.commit()
+            s.rollback()
+            raise
 
 
 
@@ -2503,44 +3881,61 @@ def insert_audit_log(
 ):
     """Append a row to ``audit_log``.
 
-    All parameters are optional except ``action``. Callers should pass
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. All
+    parameters are optional except ``action``. Callers should pass
     already-redacted / already-jsonified strings for ``old_value``,
-    ``new_value``, and ``metadata`` — this function does NOT scrub secrets
-    on its own (that is the responsibility of ``audit.log_audit``).
+    ``new_value``, and ``metadata`` — this function does NOT scrub
+    secrets on its own (that is the responsibility of
+    ``audit.log_audit``).
 
-    Returns the inserted row id, or None if the write failed. Never
-    raises — observability must not break the request that called it.
+    Returns the inserted row id, or ``None`` if the write failed.
+    Never raises — observability MUST NOT break the request that
+    called it.
+
+    Important: the legacy SQL truncated several text columns
+    (action ≤120, actor_email ≤120, target_type ≤60, target_id ≤120,
+    ip ≤64) before write. We keep those caps so a buggy caller
+    can't blow up the index sizes or the row size on Postgres.
+
+    The ``audit_log.metadata`` column maps to ``AuditLog.meta`` in
+    the ORM (alias) because ``metadata`` is a reserved attribute on
+    SQLAlchemy declarative models.
     """
     if not action:
         return None
+    from app.db.models import AuditLog
+    from app.db.session import get_session
+
     try:
-        with db_conn() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO audit_log (
-                    ts, action, actor_id, actor_email,
-                    target_type, target_id, ip, user_agent,
-                    old_value, new_value, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    int(time.time()),
-                    str(action)[:120],
-                    int(actor_id) if actor_id is not None else None,
-                    (actor_email or None) and str(actor_email)[:120],
-                    (target_type or None) and str(target_type)[:60],
-                    (target_id or None) and str(target_id)[:120],
-                    (ip or None) and str(ip)[:64],
-                    user_agent,
-                    old_value,
-                    new_value,
-                    metadata,
-                ),
-            )
-            row_id = cur.lastrowid
-            conn.commit()
-            return row_id
+        with get_session() as s:
+            try:
+                row = AuditLog(
+                    ts=int(time.time()),
+                    action=str(action)[:120],
+                    actor_id=int(actor_id) if actor_id is not None else None,
+                    actor_email=(
+                        (actor_email or None) and str(actor_email)[:120]
+                    ),
+                    target_type=(
+                        (target_type or None) and str(target_type)[:60]
+                    ),
+                    target_id=(
+                        (target_id or None) and str(target_id)[:120]
+                    ),
+                    ip=(ip or None) and str(ip)[:64],
+                    user_agent=user_agent,
+                    old_value=old_value,
+                    new_value=new_value,
+                    meta=metadata,
+                )
+                s.add(row)
+                s.flush()
+                row_id = row.id
+                s.commit()
+                return row_id
+            except Exception:
+                s.rollback()
+                raise
     except Exception:
         return None
 
@@ -2548,51 +3943,79 @@ def insert_audit_log(
 def list_audit_logs(limit=200, action=None, actor_id=None, target_type=None, target_id=None):
     """Fetch recent audit rows, newest first. Admin-only consumers.
 
-    All filters are optional; when omitted, returns the last ``limit`` rows
-    across the whole table. ``limit`` is clamped to [1, 1000] to keep admin
-    pages responsive.
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. All
+    filters are optional; when omitted, returns the last ``limit``
+    rows across the whole table. ``limit`` is clamped to ``[1, 1000]``
+    to keep admin pages responsive.
+
+    Order: ``ts DESC, id DESC`` (so two rows with the same second
+    fall back to insertion order).
+
+    Each returned dict mirrors the legacy projection:
+    ``id, ts, action, actor_id, actor_email, target_type, target_id,
+    ip, user_agent, old_value, new_value, metadata`` — note the key
+    is ``metadata`` (DB column), not ``meta`` (ORM attribute).
     """
+    from app.db.models import AuditLog
+    from app.db.session import get_session
+
     try:
         limit = max(1, min(int(limit or 200), 1000))
     except Exception:
         limit = 200
 
-    clauses = []
-    params = []
-    if action:
-        clauses.append("action = ?")
-        params.append(str(action)[:120])
-    if actor_id is not None:
-        clauses.append("actor_id = ?")
-        params.append(int(actor_id))
-    if target_type:
-        clauses.append("target_type = ?")
-        params.append(str(target_type)[:60])
-    if target_id:
-        clauses.append("target_id = ?")
-        params.append(str(target_id)[:120])
-
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    sql = (
-        "SELECT id, ts, action, actor_id, actor_email, target_type, target_id, "
-        "       ip, user_agent, old_value, new_value, metadata "
-        f"FROM audit_log {where} ORDER BY ts DESC, id DESC LIMIT ?"
-    )
-    params.append(limit)
-
     try:
-        with db_conn() as conn:
-            rows = [dict(r) for r in conn.execute(sql, tuple(params)).fetchall()]
-            return rows
+        with get_session() as s:
+            q = s.query(AuditLog)
+            if action:
+                q = q.filter(AuditLog.action == str(action)[:120])
+            if actor_id is not None:
+                q = q.filter(AuditLog.actor_id == int(actor_id))
+            if target_type:
+                q = q.filter(AuditLog.target_type == str(target_type)[:60])
+            if target_id:
+                q = q.filter(AuditLog.target_id == str(target_id)[:120])
+
+            rows = (
+                q.order_by(AuditLog.ts.desc(), AuditLog.id.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": r.id,
+                    "ts": r.ts,
+                    "action": r.action,
+                    "actor_id": r.actor_id,
+                    "actor_email": r.actor_email,
+                    "target_type": r.target_type,
+                    "target_id": r.target_id,
+                    "ip": r.ip,
+                    "user_agent": r.user_agent,
+                    "old_value": r.old_value,
+                    "new_value": r.new_value,
+                    # Legacy column name on the wire is "metadata".
+                    "metadata": r.meta,
+                }
+                for r in rows
+            ]
     except Exception:
         return []
 
 
 def count_audit_logs():
-    """Return total number of audit rows (for pagination hints)."""
+    """Return total number of audit rows (for pagination hints).
+
+    V72 / session 3 / PR #6: rewritten with SQLAlchemy ORM. Returns 0
+    on any error (never raises — same as legacy).
+    """
+    from sqlalchemy import func
+
+    from app.db.models import AuditLog
+    from app.db.session import get_session
+
     try:
-        with db_conn() as conn:
-            row = conn.execute("SELECT COUNT(*) AS n FROM audit_log").fetchone()
-            return int(row["n"]) if row else 0
+        with get_session() as s:
+            return int(s.query(func.count(AuditLog.id)).scalar() or 0)
     except Exception:
         return 0
