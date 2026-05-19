@@ -269,6 +269,145 @@ pytest -v
 
 ---
 
+## 📦 نقل البيانات الفعلي — `tools/migrate_to_postgres.py`
+
+> هذا القسم أُضيف في **الجلسة 4** من `MIGRATION_PLAN.md`. يستخدم في الجلسة 6 (التنفيذ على Hetzner).
+
+سكربت `tools/migrate_to_postgres.py` ينقل كل بيانات SQLite إلى Postgres جاهز.
+**لا يُعدّل** ملف SQLite المصدر أبداً (يفتحه بـ read-only mode تلقائياً).
+
+### ⚙️ الاستخدام الأساسي
+
+```bash
+# الافتراضات: المصدر من $DATABASE_URL، الوجهة من $POSTGRES_URL
+.venv/bin/python tools/migrate_to_postgres.py --yes
+```
+
+أو بشكل صريح:
+
+```bash
+.venv/bin/python tools/migrate_to_postgres.py \
+    --source sqlite:///data/site.db \
+    --target postgresql://tecnogems_user:<pass>@localhost:5432/tecnogems \
+    --yes
+```
+
+### 🔧 وسائط CLI
+
+| الوسيط | الافتراضي | الوصف |
+|--------|----------|-------|
+| `--source` | `$DATABASE_URL` | URL مصدر البيانات. SQLite يُلفّ تلقائياً بـ `mode=ro`. |
+| `--target` | `$POSTGRES_URL` | URL الوجهة (عادةً `postgresql://...`). |
+| `--batch-size` | `500` | عدد الصفوف لكل دفعة INSERT. |
+| `--truncate` | `false` | يحذف بيانات الوجهة قبل النقل. **يتطلّب `--yes` معه.** |
+| `--yes` | `false` | يتخطّى تأكيد المستخدم (مطلوب للـ scripts). |
+| `--no-verify` | `false` | يتخطّى التحقّق بعد النقل. |
+
+### 🛡️ ضمانات السلامة المضمَّنة
+
+1. **قراءة فقط للمصدر**: SQLite URL يُلفّ بـ `mode=ro&uri=true`. أي محاولة كتابة على المصدر تفشل.
+2. **فحص الـ schema قبل أي شيء**: لو الوجهة تنقصها جداول، أو المصدر تنقصه أعمدة → السكربت يخرج بـ `rc=1` **قبل** كتابة أي صف.
+3. **transactions ذرّية لكل جدول**: فشل في الجدول السابع لا يفسد الستة الأولى.
+4. **`--truncate` آمن**: على Postgres يستخدم `TRUNCATE ... RESTART IDENTITY CASCADE`. على SQLite يحذف ويعيد `sqlite_sequence` إلى 1.
+5. **`alembic_version` محمي**: لا يُمسح ولا يُكتب فوقه.
+6. **إعادة ضبط Postgres sequences**: بعد النقل، السكربت يكتشف اسم الـ sequence لكل عمود AUTOINCREMENT ويستدعي `setval(seq, MAX(id))`. يمنع `IntegrityError: duplicate key id=1` على أوّل INSERT بعد التشغيل.
+7. **التحقق التلقائي**: عدّ الصفوف من الجانبين + مقارنة sample من `users`.
+
+### 📋 سيناريو النقل الكامل (الجلسة 6)
+
+> أوقف التطبيق قبل النقل (`systemctl stop game-topup tecno-worker`) لتجنّب race بين السكربت والتطبيق على الوجهة.
+
+```bash
+cd /root/project
+
+# 1. اضبط متغيّر الوجهة (يبقى للـ session فقط)
+export POSTGRES_URL="postgresql://tecnogems_user:<password>@localhost:5432/tecnogems"
+
+# 2. طبّق الـ schema على Postgres (مرّة واحدة فقط، لـ DB فارغ)
+DATABASE_URL=$POSTGRES_URL .venv/bin/alembic upgrade head
+# ⬆ يُنشئ الجداول الـ 10 + 6 طرق دفع + 11 إعداد افتراضي
+# يكتب أيضاً صفّاً في alembic_version => "0001_baseline"
+
+# 3. تأكّد أن المصدر هو SQLite (وليس Postgres بالخطأ)
+unset DATABASE_URL   # حتى يستخدم data/site.db افتراضياً
+
+# 4. تجربة جافّة (تقرير قبل النقل، يحتاج ضغط Ctrl+C عند سؤال التأكيد)
+.venv/bin/python tools/migrate_to_postgres.py
+# ⬆ سيطبع: 43 users, 31 orders, 6797 products, ... ثم يسأل yes
+
+# 5. النقل الفعلي
+.venv/bin/python tools/migrate_to_postgres.py --yes
+
+# 6. تحقّق أن الـ ORM يقرأ من Postgres بنفس الأعداد
+DATABASE_URL=$POSTGRES_URL .venv/bin/python tools/verify_orm_models.py
+
+# 7. فعّل Postgres كقاعدة بيانات الإنتاج
+echo "DATABASE_URL=$POSTGRES_URL" >> /root/project/.env
+
+# 8. شغّل التطبيق
+systemctl start game-topup tecno-worker
+```
+
+### 🔄 إعادة المحاولة بعد فشل
+
+لو فشلت محاولة وقد كُتبت بعض الصفوف في الوجهة:
+
+```bash
+# امسح الوجهة وأعد كل شيء (بدون لمس المصدر)
+.venv/bin/python tools/migrate_to_postgres.py --yes --truncate
+```
+
+أو لو الوضع أسوأ، أعد إنشاء الـ schema:
+
+```bash
+DATABASE_URL=$POSTGRES_URL .venv/bin/alembic downgrade base
+DATABASE_URL=$POSTGRES_URL .venv/bin/alembic upgrade head
+.venv/bin/python tools/migrate_to_postgres.py --yes
+```
+
+### 🚦 Exit codes
+
+| القيمة | المعنى | حالة الوجهة |
+|--------|--------|------------|
+| `0` | نجاح كامل | كل البيانات منقولة + sequences معاد ضبطها |
+| `1` | فشل pre-condition (مدخلات غير صالحة، schema mismatch، رفض المستخدم) | لم تُلمَس |
+| `2` | فشل أثناء النقل | بيانات جزئية، استخدم `--truncate` للمحاولة من جديد |
+
+### 🧪 تجربة محلية (Docker)
+
+```bash
+docker run -d --name pg-test -p 5433:5432 \
+    -e POSTGRES_PASSWORD=test \
+    -e POSTGRES_DB=tecnogems_test \
+    postgres:16
+
+DATABASE_URL=postgresql://postgres:test@localhost:5433/tecnogems_test \
+    .venv/bin/alembic upgrade head
+
+.venv/bin/python tools/migrate_to_postgres.py \
+    --source sqlite:///data/site.db \
+    --target postgresql://postgres:test@localhost:5433/tecnogems_test \
+    --yes
+
+docker rm -f pg-test
+```
+
+### 🧪 الاختبارات
+
+```bash
+.venv/bin/pytest tests/test_migrate_to_postgres.py -v
+```
+
+~30 اختبار على SQLite→SQLite (CI لا يملك Postgres). يغطّي:
+- happy path (counts، dict shapes، sample row).
+- empty source.
+- pre-condition failures (missing schema، source==target، missing args، `--truncate` بدون `--yes`).
+- schema parity (drift في المصدر يوقف العملية قبل أي كتابة).
+- `--truncate` (يمسح garbage rows، idempotent).
+- read-only للمصدر (5 unit tests على coercion + سيناريو ديناميكي).
+
+---
+
 ## 🐘 خصائص Postgres مقابل SQLite
 
 | الميزة | SQLite | Postgres |
@@ -295,4 +434,4 @@ SQLite. يعني: الهجرات التي تستخدم `op.alter_column(...)` س
 
 ---
 
-**آخر تحديث:** 2026-05-18 (الجلسة 2 من MIGRATION_PLAN.md)
+**آخر تحديث:** 2026-05-19 (الجلسة 4 من MIGRATION_PLAN.md — أُضيف قسم "نقل البيانات الفعلي")
