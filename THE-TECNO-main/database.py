@@ -2809,16 +2809,17 @@ def search_users(q=None):
     preserved exactly:
 
       * Special LIKE wildcards in ``q`` are escaped via ``_escape_like``.
-      * ``q`` is matched case-sensitively against name/email/phone
+      * ``q`` is matched case-insensitively against name/email/phone
         AND against ``orders.player_id`` (so an admin can find the
-        buyer for a given player_id).
+        buyer for a given player_id). Uses ``func.lower(...)`` for
+        Postgres portability (same approach as ``search_suggest``).
       * If ``q`` parses as an int, an extra ``users.id == int(q)`` OR
         clause is added.
       * Result is DISTINCT (to avoid duplicates from the order JOIN).
       * Cap: 300 rows. Order: ``id DESC``.
       * No-query branch: same projection, 300-row cap, ``id DESC``.
     """
-    from sqlalchemy import or_
+    from sqlalchemy import func, or_
 
     from app.db.models import Order, User
     from app.db.session import get_session
@@ -2830,7 +2831,7 @@ def search_users(q=None):
 
     with get_session() as s:
         if q:
-            like = f"%{_escape_like(q)}%"
+            like = f"%{_escape_like(q)}%".lower()
             extra_id = None
             if str(q).isdigit():
                 try:
@@ -2839,10 +2840,10 @@ def search_users(q=None):
                     extra_id = None
 
             conditions = [
-                User.name.like(like, escape="\\"),
-                User.email.like(like, escape="\\"),
-                User.phone.like(like, escape="\\"),
-                Order.player_id.like(like, escape="\\"),
+                func.lower(User.name).like(like, escape="\\"),
+                func.lower(User.email).like(like, escape="\\"),
+                func.lower(User.phone).like(like, escape="\\"),
+                func.lower(Order.player_id).like(like, escape="\\"),
             ]
             if extra_id is not None:
                 conditions.append(User.id == extra_id)
@@ -3538,16 +3539,13 @@ def update_profit_margin(margin):
         margin-based USD sell_price → reset ``manual_price_syp=0``.
 
     All four operations run in a single transaction. The ``sell_price``
-    recompute walks every product in Python and sets the new value
-    (instead of an SQL-side ``ROUND(base_price * ?, 2)``) because
-    ``round(double precision, integer)`` is not a valid Postgres
-    function — Postgres only defines ``round(numeric, integer)``.
-    Recomputing in Python keeps this portable across SQLite and
-    Postgres without an explicit cast. The cost is one row pull per
-    product, but the SQLAlchemy session batches every UPDATE into a
-    single commit, so the wire round-trip count is small.
+    recompute uses a single bulk SQL UPDATE with an explicit
+    ``CAST(... AS NUMERIC)`` so that ``round(numeric, integer)`` works
+    on both SQLite and Postgres — avoiding the N round-trip Python loop
+    used in the initial ORM migration.
     """
-    from sqlalchemy import update
+    from sqlalchemy import Numeric, update
+    from sqlalchemy.sql import expression, func
 
     from app.db.models import Product, Setting
     from app.db.session import get_session
@@ -3562,9 +3560,21 @@ def update_profit_margin(margin):
             else:
                 row.value = str(margin)
 
-            # 2. Recompute every product's sell_price from base_price.
-            for p in s.query(Product).all():
-                p.sell_price = round((p.base_price or 0) * margin, 2)
+            # 2. Recompute every product's sell_price from base_price
+            #    in a single bulk UPDATE. We cast to Numeric so that
+            #    round(numeric, int) works on Postgres (Postgres does
+            #    NOT define round(double precision, int)).
+            s.execute(
+                update(Product).values(
+                    sell_price=func.round(
+                        func.cast(
+                            func.coalesce(Product.base_price, 0) * expression.literal(margin),
+                            Numeric,
+                        ),
+                        2,
+                    )
+                )
+            )
 
             # 3. Drop fixed-SYP overrides.
             s.execute(
