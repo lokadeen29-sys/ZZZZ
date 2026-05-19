@@ -1494,7 +1494,7 @@ def list_home_games():
                 & (Product.active == 1),
             )
             .filter(Game.active == 1, Game.show_on_home == 1)
-            .group_by(Game.id)
+            .group_by(Game)
             .order_by(asc(sort_key), Game.name.asc())
             .all()
         )
@@ -2080,7 +2080,7 @@ def list_public_product_groups_for_home():
                 & (Product.active == 1),
             )
             .filter(ProductGroup.active == 1, Game.active == 1)
-            .group_by(ProductGroup.id)
+            .group_by(ProductGroup, Game.name, Game.emoji, Game.image_url)
             .order_by(asc(sort_key), Game.name.asc(), ProductGroup.name.asc())
             .all()
         )
@@ -2124,7 +2124,7 @@ def list_public_games(only_active=True):
         )
         if only_active:
             q = q.filter(Game.active == 1)
-        q = q.group_by(Game.id).order_by(Game.active.desc(), Game.name.asc())
+        q = q.group_by(Game).order_by(Game.active.desc(), Game.name.asc())
 
         out = []
         for game, product_count, min_price in q.all():
@@ -2162,7 +2162,7 @@ def list_all_game_groups():
                 (Product.provider == Game.provider)
                 & (Product.game_key == Game.game_key),
             )
-            .group_by(Game.id)
+            .group_by(Game)
             .order_by(Game.provider.asc(), Game.name.asc())
             .all()
         )
