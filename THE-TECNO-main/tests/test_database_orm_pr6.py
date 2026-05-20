@@ -804,7 +804,6 @@ class TestUpdateProductsAdmin:
         assert row["pricing_mode"] == "usd"
 
 
-@pytest.mark.postgres
 class TestUpdateProfitMargin:
     def test_recomputes_sell_price_and_resets_overrides(self, app):
         db = app._test_database
@@ -1002,7 +1001,6 @@ class TestStats:
         assert s["users"] >= 1
 
 
-@pytest.mark.postgres
 class TestListUsersAndSearch:
     def test_list_users_narrow_projection(self, app, make_user):
         db = app._test_database
