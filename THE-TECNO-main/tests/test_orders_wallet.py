@@ -109,6 +109,10 @@ class TestWalletDeposit:
 
     def test_deposit_rejects_over_limit(self, app, client, make_user, login_as, monkeypatch):
         # Clamp the ceiling low so we don't need millions in the request body.
+        # Must patch the wallet blueprint's module-level copy (where the
+        # actual check lives), not just the app package re-export.
+        from app.routes import wallet_bp as _wbp
+        monkeypatch.setattr(_wbp, "MAX_DEPOSIT_USD", 100.0)
         monkeypatch.setattr(app._test_module, "MAX_DEPOSIT_USD", 100.0)
         user = make_user(email="w2@test.local")
         login_as(user["id"])
