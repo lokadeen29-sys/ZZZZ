@@ -23,6 +23,10 @@ if str(_REPO_ROOT) not in sys.path:
 def db(tmp_path, monkeypatch):
     """Provide an isolated database module with a fresh SQLite file."""
     monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.setenv("SECRET_KEY", "test-" + "x" * 48)
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@test.local")
+    monkeypatch.setenv("ADMIN_PASSWORD", "TestAdminPass123!")
+    monkeypatch.setenv("BASE_URL", "http://localhost")
 
     db_file = tmp_path / "test.db"
     # Point both the legacy raw-sqlite layer AND the SQLAlchemy ORM at
