@@ -50,7 +50,14 @@ log = logging.getLogger("tecnogems.request_ip")
 
 # قيمة fallback عند فشل كل المصادر — IP غير صالح للوصول لكنه يبقى string
 # صالح كي لا تنفجر طبقات أعلى تتوقع str.
-_FALLBACK_IP = "0.0.0.0"
+#
+# nosec B104 — bandit flags any "0.0.0.0" string literal as a possible
+# bind-to-all-interfaces. Here it is purely a sentinel value returned
+# when every IP source has failed; it is never passed to socket.bind()
+# or any server's host= argument. The CI bandit job runs with
+# ``-ll -ii`` (medium severity + confidence), so this MEDIUM/MEDIUM
+# false positive would otherwise fail the build.
+_FALLBACK_IP = "0.0.0.0"  # nosec B104
 
 
 def _env_int(name: str, default: int) -> int:

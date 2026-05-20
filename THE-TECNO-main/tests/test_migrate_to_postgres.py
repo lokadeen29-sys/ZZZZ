@@ -33,6 +33,12 @@ from app.db import models as _models  # noqa: E402,F401  — registers tables
 from tools import migrate_to_postgres as mig  # noqa: E402
 
 
+# NOTE: These tests exercise the migration tool's copy logic using SQLite on
+# both sides. They do NOT require a real Postgres service container. The
+# @pytest.mark.postgres marker will be added in a follow-up PR once the tests
+# are wired to actually run against the CI Postgres service.
+
+
 # ---------------------------------------------------------------------------
 # Sample data — one row per table so every code path is exercised.
 # Column lists mirror app/db/models.py exactly (DB-side names).
@@ -385,7 +391,7 @@ class TestHappyPath:
     def test_sample_users_section_appears(self, src_url, tgt_url):
         rc, out = _run(["--source", src_url, "--target", tgt_url, "--yes"])
         assert rc == 0
-        assert "Sample row from users" in out
+        assert "sample row from users" in out.lower()
         assert "admin@test.local" in out
 
     def test_small_batch_size_still_copies_everything(self, src_url, tgt_url):
@@ -534,8 +540,8 @@ class TestTruncate:
                 text(
                     "INSERT INTO users (id, name, email, password_hash, "
                     "role, balance, active, email_verified, "
-                    "session_version, created_at) VALUES "
-                    "(99, 'ghost', 'ghost@x', 'h', 'user', 0, 1, 1, 1, 0)"
+                    "session_version, totp_enabled, created_at) VALUES "
+                    "(99, 'ghost', 'ghost@x', 'h', 'user', 0, 1, 1, 1, 0, 0)"
                 )
             )
 
@@ -663,7 +669,7 @@ class TestNoVerify:
         assert rc == 0
         assert "Skipped verification" in out
         # Sample row block is part of verify; should not appear.
-        assert "Sample row from users" not in out
+        assert "sample row from users" not in out.lower()
 
 
 # ---------------------------------------------------------------------------

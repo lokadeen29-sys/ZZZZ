@@ -23,17 +23,30 @@ if str(_REPO_ROOT) not in sys.path:
 def db(tmp_path, monkeypatch):
     """Provide an isolated database module with a fresh SQLite file."""
     monkeypatch.setenv("FLASK_ENV", "development")
+    monkeypatch.setenv("SECRET_KEY", "test-" + "x" * 48)
+    monkeypatch.setenv("ADMIN_EMAIL", "admin@test.local")
+    monkeypatch.setenv("ADMIN_PASSWORD", "TestAdminPass123!")
+    monkeypatch.setenv("BASE_URL", "http://localhost")
 
-    # Remove cached modules so DB_PATH takes effect
+    db_file = tmp_path / "test.db"
+    # Point both the legacy raw-sqlite layer AND the SQLAlchemy ORM at
+    # the same tmp file so inserts via db_conn() are visible to ORM queries.
+    monkeypatch.setenv("DATABASE_URL", str(db_file))
+
+    # Remove cached modules so DB_PATH / DATABASE_URL changes take effect
     for mod in list(sys.modules):
-        if mod == "database" or mod.startswith("database."):
+        if mod == "database" or mod.startswith("database.") or mod.startswith("app.db"):
             del sys.modules[mod]
 
     import database
-    db_file = tmp_path / "test.db"
     database.DB_PATH = str(db_file)
     database._PRAGMAS_APPLIED = False
     database.init_db()
+
+    # Reset the SQLAlchemy engine so it picks up the new DATABASE_URL
+    from app.db.base import reset_engine
+    reset_engine()
+
     return database
 
 
