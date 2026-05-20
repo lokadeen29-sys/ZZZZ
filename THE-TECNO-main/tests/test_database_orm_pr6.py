@@ -1390,3 +1390,146 @@ class TestAuditLog:
         db.insert_audit_log("CT_1")
         db.insert_audit_log("CT_2")
         assert db.count_audit_logs() == before + 2
+
+
+
+# ===========================================================================
+# Hotfix (post PR #24): Postgres GROUP BY parity
+#
+# PR #24 used `.group_by(Game)` / `.group_by(ProductGroup, ...)` thinking
+# SQLAlchemy 2.0 would expand each model to "all of its mapped columns".
+# It does not — the model expression resolves to the primary key only,
+# leaving non-aggregate SELECT columns (Game.name, Game.emoji,
+# Game.image_url, …) outside GROUP BY. SQLite is permissive and
+# silently picks an arbitrary value, but Postgres correctly raises
+# GroupingError on the same query.
+#
+# Production deploy on 2026-05-20 caught this exactly. Health check
+# on the new release rolled back automatically with:
+#
+#   psycopg2.errors.GroupingError: column "games.name" must appear in
+#   the GROUP BY clause
+#
+# These tests exercise each of the four affected functions against a
+# real Postgres so the regression cannot come back: a future
+# `.group_by(Model)` in any of them would fail this test BEFORE
+# touching production again.
+# ===========================================================================
+class TestGroupByPostgresParity:
+    """Each of the four affected list_* functions must execute on Postgres
+    without raising GroupingError. Seeds minimal data through the ORM
+    (NOT raw SQL) because raw SQL would bypass the connection the
+    function-under-test uses; we want both writer and reader on the
+    same engine the postgres_session fixture configured."""
+
+    _seeded = False
+
+    @classmethod
+    def _seed_minimal_catalog(cls):
+        """Insert two games, one product_group, two products. Just
+        enough rows that GROUP BY actually has something to group.
+
+        Idempotent: only inserts on the first call within a test session
+        (the postgres_session fixture truncates between test functions,
+        but all 4 tests in this class share the same fixture invocation
+        when pytest runs them sequentially within one session scope).
+        """
+        if cls._seeded:
+            return
+        from app.db.models import Game, Product, ProductGroup
+        from app.db.session import get_session
+
+        with get_session() as s:
+            # Guard: skip if rows already present (e.g. fixture didn't truncate yet)
+            existing = s.query(Game).filter_by(provider="server1", game_key="g1").first()
+            if existing is not None:
+                cls._seeded = True
+                return
+
+            g1 = Game(
+                provider="server1", game_key="g1", name="Game One",
+                emoji="🎮", image_url="", active=1,
+                pricing_currency="GLOBAL",
+                show_on_home=1, home_sort_order=1,
+            )
+            g2 = Game(
+                provider="server1", game_key="g2", name="Game Two",
+                emoji="🕹", image_url="", active=1,
+                pricing_currency="GLOBAL",
+                show_on_home=0, home_sort_order=0,
+            )
+            s.add_all([g1, g2])
+            s.flush()
+
+            pg1 = ProductGroup(
+                provider="server1", game_key="g1", name="Pack Bundle",
+                image_url="", sort_order=1, active=1,
+                created_at=int(time.time()),
+            )
+            s.add(pg1)
+            s.flush()
+
+            s.add_all([
+                Product(
+                    provider="server1", game_key="g1",
+                    provider_product_id="p1", name="Pack 1",
+                    base_price=1.0, sell_price=2.0, active=1,
+                    sort_order=0, group_id=pg1.id,
+                ),
+                Product(
+                    provider="server1", game_key="g1",
+                    provider_product_id="p2", name="Pack 2",
+                    base_price=2.0, sell_price=3.5, active=1,
+                    sort_order=1, group_id=pg1.id,
+                ),
+            ])
+            s.commit()
+        cls._seeded = True
+
+    @pytest.mark.postgres
+    def test_list_home_games_no_grouping_error(self, postgres_session):
+        import database
+        self._seed_minimal_catalog()
+        rows = database.list_home_games()
+        # g1 has show_on_home=1, g2 doesn't → exactly 1 row.
+        assert len(rows) == 1
+        assert rows[0]["name"] == "Game One"
+        assert rows[0]["product_count"] == 2
+        assert rows[0]["min_price"] == 2.0
+
+    @pytest.mark.postgres
+    def test_list_public_games_no_grouping_error(self, postgres_session):
+        import database
+        self._seed_minimal_catalog()
+        rows = database.list_public_games(only_active=True)
+        # Both games are active → 2 rows; g2 has zero products.
+        assert len(rows) == 2
+        by_name = {r["name"]: r for r in rows}
+        assert by_name["Game One"]["product_count"] == 2
+        assert by_name["Game Two"]["product_count"] == 0
+        assert by_name["Game Two"]["min_price"] is None
+
+    @pytest.mark.postgres
+    def test_list_all_game_groups_no_grouping_error(self, postgres_session):
+        import database
+        self._seed_minimal_catalog()
+        rows = database.list_all_game_groups()
+        assert len(rows) == 2
+        names = [r["name"] for r in rows]
+        assert "Game One" in names and "Game Two" in names
+
+    @pytest.mark.postgres
+    def test_list_public_product_groups_for_home_no_grouping_error(
+        self, postgres_session,
+    ):
+        import database
+        self._seed_minimal_catalog()
+        rows = database.list_public_product_groups_for_home()
+        # Exactly one ProductGroup linked to active Game One.
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["name"] == "Pack Bundle"
+        assert r["game_name"] == "Game One"
+        assert r["game_emoji"] == "🎮"
+        assert r["product_count"] == 2
+        assert r["min_price"] == 2.0
