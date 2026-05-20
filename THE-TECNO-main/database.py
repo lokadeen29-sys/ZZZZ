@@ -2607,7 +2607,16 @@ def update_order(order_id, status, provider_order_id=None, note=None):
         UPDATE-then-SELECT order is the same so the refund check is
         still race-safe.
       * Re-raises on any exception (with rollback) — never swallows.
+
+    V74 race fix: the refund credit on rejection is now applied via a
+    SQL-level ``UPDATE users SET balance = COALESCE(balance, 0) + ?``
+    instead of a Python read-then-write. This eliminates the
+    lost-update window when two admins reject (or otherwise refund)
+    concurrent orders for the same user. The same atomic pattern is
+    already used (correctly) by :func:`change_balance`.
     """
+    from sqlalchemy import func, update
+
     from app.db.models import Order, User
     from app.db.session import get_session
 
@@ -2636,12 +2645,18 @@ def update_order(order_id, status, provider_order_id=None, note=None):
             # Only refund when the new status is `rejected` AND the order
             # was not already rejected — prevents the double-refund bug.
             if status == "rejected" and old_status != "rejected":
-                user = s.get(User, old_user_id)
-                if user is not None:
-                    # Mirror the old `balance = balance + ?` semantics.
-                    # We deliberately do NOT clamp at zero; if the price
-                    # was non-positive this becomes a no-op.
-                    user.balance = (user.balance or 0) + old_price
+                # V74: atomic SQL-level credit. Equivalent to the legacy
+                # ``UPDATE users SET balance = COALESCE(balance,0) + ?``
+                # — race-safe under concurrent refunds on the same user.
+                # Missing-user rows match zero rows (no-op), mirroring
+                # the previous ``if user is not None`` guard. We also
+                # deliberately do NOT clamp at zero; if the price was
+                # non-positive this becomes a no-op-equivalent delta.
+                s.execute(
+                    update(User)
+                    .where(User.id == old_user_id)
+                    .values(balance=func.coalesce(User.balance, 0) + old_price)
+                )
 
             s.commit()
             return True
@@ -3402,7 +3417,19 @@ def update_deposit(deposit_id, status):
         The READ-MODIFY-WRITE order is unchanged so the
         "approved-twice" race is still avoided on Postgres.
       * Re-raises on any exception (with rollback) — never swallows.
+
+    V74 race fix: the balance credit on approval is now applied via a
+    SQL-level ``UPDATE users SET balance = COALESCE(balance, 0) + ?``
+    instead of a Python read-then-write. This eliminates the
+    lost-update window when two admins approve concurrent deposits
+    for the same user (the previous ORM attribute assignment loaded
+    the row, mutated it in Python, then flushed — between load and
+    flush, another transaction could have committed a different
+    value). The same atomic pattern is already used (correctly) by
+    :func:`change_balance`.
     """
+    from sqlalchemy import func, update
+
     from app.db.models import Deposit, User
     from app.db.session import get_session
 
@@ -3441,10 +3468,16 @@ def update_deposit(deposit_id, status):
                         dep.amount, dep.currency or "USD"
                     )
 
-                user = s.get(User, dep.user_id)
-                if user is not None:
-                    # Mirror the old `balance = balance + ?` semantics.
-                    user.balance = (user.balance or 0) + amount_to_add
+                # V74: atomic SQL-level credit. Equivalent to the legacy
+                # ``UPDATE users SET balance = COALESCE(balance,0) + ?``
+                # — race-safe under concurrent approvals on the same
+                # user. Missing-user rows match zero rows (no-op),
+                # mirroring the previous ``if user is not None`` guard.
+                s.execute(
+                    update(User)
+                    .where(User.id == dep.user_id)
+                    .values(balance=func.coalesce(User.balance, 0) + amount_to_add)
+                )
 
             s.commit()
             return True
