@@ -9,7 +9,7 @@ Three concerns, three sections:
   2. ``database.update_order_provider_response`` — 3 scenarios for the
      forensic-write helper (truncation, ``None``, unknown order id).
 
-  3. Alembic migration ``0002_orders_provider_response_raw`` — verifies
+  3. Alembic migration ``0002_orphan_recovery`` — verifies
      the new column AND the orphan-watch index land on a fresh DB.
 
 The extractor section depends only on ``providers.py``, so it imports
@@ -362,7 +362,7 @@ def _alembic_cfg(db_path: Path) -> Config:
 
 
 class TestMigration0002OrdersProviderResponseRaw:
-    """Alembic migration ``0002_orders_provider_response_raw``."""
+    """Alembic migration ``0002_orphan_recovery``."""
 
     def test_upgrade_head_adds_provider_response_raw_column(self, tmp_path):
         cfg = _alembic_cfg(tmp_path / "v73.db")

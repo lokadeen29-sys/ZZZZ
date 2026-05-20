@@ -1,6 +1,6 @@
 """orders_provider_response_raw — V73 orphan-recovery restore.
 
-Revision ID: 0002_orders_provider_response_raw
+Revision ID: 0002_orphan_recovery
 Revises: 0001_baseline
 Create Date: 2026-05-20 00:00:00 UTC
 
@@ -30,7 +30,12 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = "0002_orders_provider_response_raw"
+# NOTE: keep this string ≤ 32 characters — Alembic creates the
+# ``alembic_version.version_num`` column as ``VARCHAR(32)`` by default,
+# and Postgres rejects longer values with StringDataRightTruncation
+# (the original ``0002_orders_provider_response_raw`` id was 33 chars
+# and broke the V73 deploy on 2026-05-20).
+revision: str = "0002_orphan_recovery"
 down_revision: Union[str, None] = "0001_baseline"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
