@@ -141,6 +141,16 @@ def process_order(order_id: int):
     from database import get_order, get_product_by_id, update_order, get_setting
     from providers import create_provider_order, normalize_supplier_create_status
 
+    # V73: imported lazily — kept optional so the worker still runs on a
+    # box that has the legacy ``database.py`` without the new helper
+    # (e.g. mid-rollback). Falls back to a no-op stub if the import
+    # raises ImportError / AttributeError.
+    try:
+        from database import update_order_provider_response as _persist_raw
+    except Exception:
+        def _persist_raw(_order_id, _raw):  # type: ignore[no-redef]
+            return None
+
     try:
         order = get_order(order_id)
         if not order:
@@ -173,8 +183,35 @@ def process_order(order_id: int):
             product["provider_product_id"],   # ← critical: external supplier id
             order["player_id"],
         )
+
+        # V73: persist the raw supplier response BEFORE any further parsing.
+        # This is the cornerstone of orphan recovery — even if the response
+        # shape is unexpected and ``provider_order_id`` extraction fails
+        # (the exact bug we are fixing), the row still has a forensic
+        # trail for manual replay. ``update_order_provider_response``
+        # never raises, so wrapping in try/except is belt-and-braces.
+        try:
+            _persist_raw(order_id, res)
+        except Exception as _exc:
+            log.warning(
+                "process_order %s: failed to persist raw supplier response: %s",
+                order_id, _exc,
+            )
+
         log.info("process_order %s: supplier response keys=%s",
                  order_id, list(res.keys()) if isinstance(res, dict) else type(res).__name__)
+
+        # V73 diagnostic aid: when the supplier nests the id under
+        # ``data`` we want admins to see the first chunk of that block
+        # in the worker log without having to query the DB. Capped at
+        # 500 chars so a verbose response cannot flood journald.
+        try:
+            if isinstance(res, dict) and "data" in res:
+                _data_preview = repr(res.get("data"))[:500]
+                log.info("process_order %s: response.data=%s", order_id, _data_preview)
+        except Exception:
+            # Logging must never break order processing.
+            pass
 
         auto_refund = get_setting("auto_refund_on_failure", "0") == "1"
 
@@ -196,6 +233,20 @@ def process_order(order_id: int):
         #   - error/success=false    → manual_pending or rejected (auto-refund)
         norm = normalize_supplier_create_status(product["provider"], res)
         provider_order_id = norm.get("provider_order_id") or ""
+
+        # V73: orphan watchlist. If the supplier accepted the order
+        # but we could not extract a provider_order_id, the periodic
+        # poller (``refresh_pending_orders``) will skip this row
+        # forever. Log a WARNING so the alert pipeline can flag it
+        # before the user notices "stuck order" in the dashboard.
+        if norm.get("ok") and not provider_order_id:
+            log.warning(
+                "Order %s accepted by supplier but no provider_order_id "
+                "extracted (provider=%s, response_keys=%s) — orphan watchlist",
+                order_id,
+                product.get("provider"),
+                list(res.keys()) if isinstance(res, dict) else type(res).__name__,
+            )
 
         if not norm.get("ok"):
             reason = _sanitise_supplier_note(norm.get("error") or "Supplier error")

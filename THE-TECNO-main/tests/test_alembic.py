@@ -209,7 +209,11 @@ def test_alembic_version_table_records_revision(fresh_db):
         rev = conn.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar()
-        assert rev == "0001_baseline"
+        # V73: head is now 0002_orders_provider_response_raw. The old
+        # baseline assertion (`rev == "0001_baseline"`) regressed when
+        # we added the orphan-recovery migration; update tests in
+        # lockstep with every new revision.
+        assert rev == "0002_orders_provider_response_raw"
 
 
 def test_downgrade_base_drops_all_tables(fresh_db):

@@ -15,9 +15,10 @@
 | 2 | تهيئة Alembic + baseline | ✅ مكتملة | 2026-05-18 |
 | 3 | إعادة كتابة database.py بـ ORM | ✅ مكتملة (PRs #1–#6 مدموجة + إصلاحات portability #20) | 2026-05-19 |
 | 4 | كتابة سكربت نقل البيانات | ✅ مكتملة (PR #21 مدموج) | 2026-05-19 |
-| 5 | تثبيت Postgres على Hetzner | ⏳ التالية — تنفيذ المستخدم على السيرفر | - |
-| 6 | تنفيذ النقل + الاختبار | ⏸️ بعد الجلسة 5 | - |
+| 5 | تثبيت Postgres على Hetzner | ✅ مكتملة | 2026-05-20 |
+| 6 | تنفيذ النقل + الاختبار | ✅ مكتملة | 2026-05-20 |
 | 7 | التنظيف النهائي | ⏸️ ينتظر أسبوعاً من استقرار الجلسة 6 | - |
+| Hotfix V73 | استعادة "حفظ ردود الموردين الخام" + المحلل العودي للـ provider_order_id | ⏳ قيد المراجعة — `feat/restore-v73-orphan-recovery` | - |
 
 **الحالات:**
 - ⏸️ لم تبدأ
@@ -1130,7 +1131,7 @@ cd /root/project
 
 ## 🖥️ الجلسة 5: تثبيت Postgres على Hetzner
 
-**الحالة:** لم تبدأ
+**الحالة:** ✅ مكتملة (2026-05-20)
 
 **الهدف:** تثبيت PostgreSQL على سيرفر Hetzner (مجاناً).
 
@@ -1174,7 +1175,12 @@ psql -h localhost -U tecnogems_user -d tecnogems -c "SELECT version();"
 
 ## 🚀 الجلسة 6: التنفيذ النهائي + الاختبار
 
-**الحالة:** لم تبدأ
+**الحالة:** ✅ مكتملة (2026-05-20)
+
+> ✅ تم بنجاح: التطبيق يعمل الآن على PostgreSQL (`DATABASE_URL=postgresql://...@localhost:5432/tecnogems`).
+> البيانات منقولة، السكربت `tools/verify_migration.py` نظيف، السلوك الإنتاجي مستقر.
+> **خطوة لاحقة (post-merge V73):** بعد دمج هذا الإصلاح يجب تشغيل `alembic upgrade head` على السيرفر — راجع
+> قسم "إصلاح V73 (Hotfix)" في نهاية الملف.
 
 **الهدف:** المشروع يعمل على Postgres بكل البيانات منقولة.
 
@@ -1352,3 +1358,103 @@ Kiro سيقرأ ملف `MIGRATION_PLAN.md`، يفحص حالة كل جلسة، �
 **المسؤول:** Kiro + المستخدم  
 
 > 💬 لأي استفسار: ابدأ محادثة جديدة وقل _"عندي سؤال عن MIGRATION_PLAN.md"_
+
+
+
+---
+
+## 🩹 إصلاح V73 (Hotfix): استعادة "حفظ ردود الموردين الخام"
+
+**الحالة:** ⏳ قيد المراجعة — فرع `feat/restore-v73-orphan-recovery`
+**نوع الإصلاح:** ترميم ميزة فُقدت أثناء استخراج الكود من الـ zip في PR #4 (V72 / Session 3).
+
+### السياق
+
+PR #2 (V73) في فرع `chore/extract-source` كان يضيف ميزة "حفظ ردود الموردين الخام" لتشخيص
+الطلبات العالقة في `supplier_pending`. عند الاستخراج النهائي للكود في PR #4 ضاعت
+كل التغييرات. **logs الإنتاج (2026-05-20)** أظهرت إعادة ظهور الباغ على الطلب
+`id=32` (server2، مستخدم 44، 4.62 USD، 325 شدات PUBG):
+
+```
+INFO:tasks:process_order 32: supplier response keys=['success', 'data']
+INFO:tasks:Order 32 queued at supplier (provider id=)   ← فارغ
+```
+
+`server2` يضع `order_id` داخل `data` block بشكل غير قياسي
+(مثلاً `data.transaction_id` بدل `data.order_id`)، والمحلل القديم لا يبحث recursively.
+
+### المكونات المُستعادة (5 طبقات + اختبارات)
+
+1. **Migration Alembic جديدة** — `migrations/versions/20260520_0000_0002_orders_provider_response_raw.py`
+   - يضيف عمود `orders.provider_response_raw TEXT NULL`.
+   - يُنشئ `idx_orders_orphan ON orders(status, provider_order_id)`
+     — partial على Postgres (`WHERE provider_response_raw IS NOT NULL`)، عادي على SQLite.
+   - `downgrade()` متناظر — يستعمل `op.batch_alter_table` لـ DROP COLUMN على SQLite القديم.
+
+2. **عمود ORM** — `app/db/models.py`: `Order.provider_response_raw = Column(Text)` + تعريف
+   `Index("idx_orders_orphan", ..., postgresql_where=...)` فيها كذلك.
+
+3. **`database.update_order_provider_response()`** — دالة جديدة بجوار `update_order`:
+   - تقبل dict / str / أي شيء، تُسلسلها (`json.dumps` للـ dict)، تقصّ على 4096 char + "…".
+   - **لا ترفع استثناء أبداً** (forensic write — لا يجب أن يكسر معالجة الطلب).
+   - تستعمل `get_session()` (ORM فقط، لا raw SQL).
+
+4. **محلل عودي ذكي** — `providers._extract_order_id_from_response`:
+   - قائمة priority: `order_id, transaction_id, tracking_id, reference_id, order, id`.
+   - substring fallback لأي مفتاح يحتوي `order/transaction/tracking/reference`.
+   - فلتر قيمي يرفض bool / "" / strings > 80 char.
+   - يتجاهل `client_order_id` (UUID المُولّد محلياً قبل استدعاء Shop2Topup).
+   - depth cap = 6.
+   - يبدأ بمسارات V68 المعروفة (سرعة + توافق) ثم يسقط إلى البحث الشامل.
+
+5. **`tasks.process_order()`**:
+   - استدعاء `_persist_raw(order_id, res)` **قبل** أي parsing — حتى الردود المشوّهة تُحفظ.
+   - `log.warning` عند قبول supplier للطلب بدون استخراج `provider_order_id` (orphan watchlist).
+   - `log.info` للـ `response['data']` (أول 500 char) لتسهيل التشخيص في journald.
+
+### اختبارات
+
+`tests/test_orphan_orders_v73.py`:
+- 19 سيناريو للـ extractor (legacy V68 shapes + recursive fallback + priority + depth limit + value filter + ignore client_order_id).
+- 4 سيناريوهات للـ persistence (truncation 4 KiB، dict→json، None → no-op، unknown id → no-op).
+- 3 فحوصات Alembic (column exists، index exists، downgrade round-trip).
+
+### تحقق محلي
+
+- ✅ `python -m py_compile` على كل الملفات المعدّلة (الـ sandbox مغلق الشبكة، فلا pip install،
+  ولا تشغيل alembic / pytest فعلي — يقع ذلك على CI).
+
+### بعد الدمج (deploy على السيرفر)
+
+```bash
+# 1. deploy المعتاد
+scp -r THE-TECNO-main/ root@server:/root/project/
+ssh root@server '/root/deploy.sh'
+
+# 2. تشغيل migration الجديدة على Postgres
+cd /root/project
+.venv/bin/alembic upgrade head
+
+# 3. إعادة تشغيل الـ worker حتى يلتقط الكود الجديد
+systemctl restart tecno-worker
+
+# 4. مراقبة journald لمدة ساعة:
+journalctl -u tecno-worker -f | grep -E 'orphan watchlist|provider_response_raw'
+```
+
+### النتيجة المتوقعة
+
+- الطلب التالي على server2 بنفس الشكل (`data.transaction_id`) يستخرج المعرّف بنجاح.
+- أي طلب يبقى في `supplier_pending` بدون `provider_order_id` يتم تسجيله بـ
+  `WARNING ... orphan watchlist`، **و** يكون لديه `provider_response_raw` كامل في الـ DB
+  للإعادة اليدوية.
+- استعلام إيجاد المُيتّمين الحاليين على Postgres:
+  ```sql
+  SELECT id, status, provider, created_at,
+         left(provider_response_raw, 200) AS sample
+  FROM orders
+  WHERE status = 'supplier_pending'
+    AND (provider_order_id IS NULL OR provider_order_id = '')
+    AND provider_response_raw IS NOT NULL;
+  ```
+  (الفهرس الجديد `idx_orders_orphan` partial — يُحسّن هذا الاستعلام تلقائياً.)

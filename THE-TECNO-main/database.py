@@ -74,6 +74,12 @@ def ensure_indexes():
             "CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at)",
             "CREATE INDEX IF NOT EXISTS idx_orders_user_created ON orders(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at DESC)",
+            # V73: orphan-watch index. SQLite supports partial indexes
+            # (3.8+) and accepts the WHERE clause directly; on Postgres
+            # the dedicated Alembic migration handles the partial form,
+            # but defining it here too keeps the legacy init path in
+            # sync with the ORM model declaration.
+            "CREATE INDEX IF NOT EXISTS idx_orders_orphan ON orders(status, provider_order_id) WHERE provider_response_raw IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_deposits_user_id ON deposits(user_id)",
             "CREATE INDEX IF NOT EXISTS idx_deposits_status ON deposits(status)",
             "CREATE INDEX IF NOT EXISTS idx_deposits_user_created ON deposits(user_id, created_at DESC)",
@@ -538,6 +544,16 @@ def _init_db_inner(conn):
         updated_at INTEGER NOT NULL
     )
     """)
+
+    # V73: orphan-recovery — store the raw supplier response for every
+    # order BEFORE parsing it, so stuck ``supplier_pending`` rows always
+    # have a forensic trail even when ``provider_order_id`` extraction
+    # fails. Mirrors Alembic migration 0002 for the legacy SQLite path
+    # (test fixtures + dev) where init_db is the source of truth.
+    try:
+        cur.execute("ALTER TABLE orders ADD COLUMN provider_response_raw TEXT")
+    except Exception:
+        pass
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS deposits (
@@ -2632,6 +2648,90 @@ def update_order(order_id, status, provider_order_id=None, note=None):
         except Exception:
             s.rollback()
             raise
+
+
+# V73: raw supplier-response persistence — companion of `update_order`.
+# Saved BEFORE the worker tries to parse the response so a stuck
+# `supplier_pending` row keeps a forensic trail even when order_id
+# extraction fails.
+_ORDER_RAW_RESPONSE_MAX_LEN = 4096
+
+
+def update_order_provider_response(order_id, raw_response):
+    """Persist the raw supplier reply for an order, capped at 4 KiB.
+
+    V73: companion of :func:`update_order`. Called by ``tasks.process_order``
+    immediately after the supplier HTTP round-trip, *before* any further
+    parsing — so even if the response shape is unexpected (the orphan
+    bug we are fixing), we still have the original payload on disk.
+
+    Contract:
+
+      * ``raw_response`` may be a ``dict``/``list`` (serialised via
+        ``json.dumps``), a ``str``, or anything else (rendered with
+        ``str()``).
+      * The serialised text is truncated to
+        ``_ORDER_RAW_RESPONSE_MAX_LEN`` characters; if it overflows we
+        keep the first ``MAX-1`` chars and append ``"…"`` so admins can
+        see the boundary at a glance. The 4 KiB cap is conservative —
+        Postgres TEXT columns can hold gigabytes — but it shields the
+        row from a misbehaving supplier returning a megabyte of HTML.
+      * **Never raises.** Any failure (JSON serialisation, missing row,
+        DB error) is swallowed silently. The order's primary update
+        path must not be affected by a forensic-only side effect.
+      * Uses ``get_session()`` (ORM only — no raw SQL) so behaviour is
+        identical on SQLite (test/dev) and Postgres (production).
+      * Silent no-op when ``raw_response`` is ``None``, ``order_id`` is
+        invalid, or the order does not exist.
+    """
+    if raw_response is None:
+        return
+
+    # Step 1: render to text. Any failure here falls back to ``str()``.
+    try:
+        if isinstance(raw_response, (dict, list)):
+            payload = json.dumps(raw_response, ensure_ascii=False, default=str)
+        elif isinstance(raw_response, str):
+            payload = raw_response
+        else:
+            payload = str(raw_response)
+    except Exception:
+        try:
+            payload = str(raw_response)
+        except Exception:
+            return  # cannot even stringify — give up silently
+
+    # Step 2: hard 4 KiB cap with a visible truncation marker.
+    if len(payload) > _ORDER_RAW_RESPONSE_MAX_LEN:
+        payload = payload[: _ORDER_RAW_RESPONSE_MAX_LEN - 1] + "…"
+
+    # Step 3: ORM write. Any error → swallow.
+    try:
+        oid = int(order_id)
+    except (TypeError, ValueError):
+        return
+
+    try:
+        from app.db.models import Order
+        from app.db.session import get_session
+
+        with get_session() as s:
+            try:
+                row = s.get(Order, oid)
+                if row is None:
+                    return
+                row.provider_response_raw = payload
+                s.commit()
+            except Exception:
+                try:
+                    s.rollback()
+                except Exception:
+                    pass
+                # NEVER re-raise: this is a best-effort forensic write.
+                return
+    except Exception:
+        # Imports / session construction blew up. Stay silent.
+        return
 
 
 
