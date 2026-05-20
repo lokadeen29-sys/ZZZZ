@@ -1422,14 +1422,30 @@ class TestGroupByPostgresParity:
     function-under-test uses; we want both writer and reader on the
     same engine the postgres_session fixture configured."""
 
-    @staticmethod
-    def _seed_minimal_catalog():
+    _seeded = False
+
+    @classmethod
+    def _seed_minimal_catalog(cls):
         """Insert two games, one product_group, two products. Just
-        enough rows that GROUP BY actually has something to group."""
+        enough rows that GROUP BY actually has something to group.
+
+        Idempotent: only inserts on the first call within a test session
+        (the postgres_session fixture truncates between test functions,
+        but all 4 tests in this class share the same fixture invocation
+        when pytest runs them sequentially within one session scope).
+        """
+        if cls._seeded:
+            return
         from app.db.models import Game, Product, ProductGroup
         from app.db.session import get_session
 
         with get_session() as s:
+            # Guard: skip if rows already present (e.g. fixture didn't truncate yet)
+            existing = s.query(Game).filter_by(provider="server1", game_key="g1").first()
+            if existing is not None:
+                cls._seeded = True
+                return
+
             g1 = Game(
                 provider="server1", game_key="g1", name="Game One",
                 emoji="🎮", image_url="", active=1,
@@ -1468,6 +1484,7 @@ class TestGroupByPostgresParity:
                 ),
             ])
             s.commit()
+        cls._seeded = True
 
     @pytest.mark.postgres
     def test_list_home_games_no_grouping_error(self, postgres_session):
