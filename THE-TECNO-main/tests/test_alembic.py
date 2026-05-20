@@ -39,6 +39,13 @@ from alembic.config import Config  # noqa: E402
 from sqlalchemy import create_engine, inspect, text  # noqa: E402
 
 
+# All tests in this module exercise a real DB schema upgrade path; we want
+# them in the dedicated Postgres CI pass so a Postgres-only migration bug
+# (e.g. a missing CASCADE, a Postgres-only DDL clause) cannot hide behind
+# SQLite's looser semantics.
+pytestmark = pytest.mark.postgres
+
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _ALEMBIC_INI = _REPO_ROOT / "alembic.ini"
 

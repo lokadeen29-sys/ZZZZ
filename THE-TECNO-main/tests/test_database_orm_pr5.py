@@ -219,6 +219,7 @@ class TestChangeBalance:
 # ===========================================================================
 # create_order — happy path + balance deduction
 # ===========================================================================
+@pytest.mark.postgres
 class TestCreateOrderHappyPath:
     """Successful purchase: row inserted + balance deducted by exactly
     the stored ``price`` (which is also returned)."""
@@ -313,6 +314,7 @@ class TestCreateOrderHappyPath:
 # ===========================================================================
 # create_order — V47 atomic balance check
 # ===========================================================================
+@pytest.mark.postgres
 class TestCreateOrderInsufficientBalance:
     """The V47 contract: when balance < price, no row is inserted and
     the user's balance is NOT touched."""
@@ -376,6 +378,7 @@ class TestCreateOrderInsufficientBalance:
 # ===========================================================================
 # create_order — order_code uniqueness (V50 C2)
 # ===========================================================================
+@pytest.mark.postgres
 class TestCreateOrderCode:
     def test_codes_are_unique_across_many_orders(self, app, make_user):
         """V50: ``order_code`` MUST come from ``secrets.token_urlsafe``.

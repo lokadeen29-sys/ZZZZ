@@ -33,6 +33,12 @@ from app.db import models as _models  # noqa: E402,F401  — registers tables
 from tools import migrate_to_postgres as mig  # noqa: E402
 
 
+# This is the closest thing we have to an end-to-end migration smoke test;
+# route it through the Postgres CI pass so the Postgres-shaped backend gets
+# at least one run of the copy + verify pipeline per CI build.
+pytestmark = pytest.mark.postgres
+
+
 # ---------------------------------------------------------------------------
 # Sample data — one row per table so every code path is exercised.
 # Column lists mirror app/db/models.py exactly (DB-side names).

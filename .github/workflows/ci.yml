@@ -2,11 +2,23 @@
 #
 # Jobs:
 #   1. tests    — pytest suite on Python 3.11 (matches production runtime)
+#                 Splits into two passes: SQLite-default (excludes the
+#                 `postgres` marker) and a Postgres pass (selects only
+#                 `postgres`-marked tests, run against a real Postgres 16
+#                 service container). Splitting catches Postgres-only
+#                 portability bugs without slowing the main suite.
 #   2. bandit   — static security analysis for Python sources (medium+ severity)
 #   3. pip_audit — CVE scan against the pinned requirements.txt
 #
-# Keep this file minimal and fast: the whole pipeline should finish in under
-# three minutes on a fresh runner, so every PR gets same-day feedback.
+# NOTE: The application code lives in `THE-TECNO-main/`, not at the repo
+# root. Every job sets `defaults.run.working-directory` so step commands
+# resolve relative to that subdirectory. `cache-dependency-path` keys are
+# also rewritten with the same prefix because actions/setup-python
+# resolves them relative to the workspace root, not the per-job default.
+#
+# Keep this file minimal and fast: the whole pipeline should finish in
+# under three minutes on a fresh runner, so every PR gets same-day
+# feedback.
 
 name: CI
 
@@ -29,6 +41,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    defaults:
+      run:
+        working-directory: THE-TECNO-main
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci_test
+          POSTGRES_DB: tecnogems_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     env:
       # Satisfy app.py import-time guards.
       FLASK_ENV: development
@@ -38,6 +68,9 @@ jobs:
       BASE_URL: http://localhost
       PYTHONDONTWRITEBYTECODE: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      # Picked up by the `postgres_session` fixture in tests/conftest.py.
+      # When unset locally, postgres-marked tests skip cleanly.
+      TEST_POSTGRES_URL: postgresql://postgres:ci_test@localhost:5432/tecnogems_ci
 
     steps:
       - uses: actions/checkout@v4
@@ -48,21 +81,33 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+            THE-TECNO-main/requirements.txt
+            THE-TECNO-main/requirements-dev.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run pytest
-        run: pytest -ra
+      # SQLite pass — every test that does NOT need a real Postgres.
+      # This is the bulk of the ~200+ tests; keeps the matrix fast.
+      - name: Run pytest (SQLite)
+        run: pytest -ra -m "not postgres"
+
+      # Postgres pass — only tests explicitly marked with @pytest.mark.postgres.
+      # Catches portability bugs (case-sensitive LIKE, GROUP BY rules,
+      # round(double, int) signature, etc.) that SQLite happily ignores.
+      - name: Run pytest (Postgres)
+        run: pytest -ra -m postgres
 
   bandit:
     name: bandit (SAST)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: THE-TECNO-main
 
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +117,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-dev.txt
+          cache-dependency-path: THE-TECNO-main/requirements-dev.txt
 
       - name: Install bandit
         run: |
@@ -97,6 +142,10 @@ jobs:
     # then we want visibility, not a red merge button.
     continue-on-error: true
 
+    defaults:
+      run:
+        working-directory: THE-TECNO-main
+
     steps:
       - uses: actions/checkout@v4
 
@@ -105,7 +154,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: THE-TECNO-main/requirements.txt
 
       - name: Install pip-audit
         run: |

@@ -202,3 +202,65 @@ def login_as(client):
         return client
 
     return _do
+
+
+
+# ---------------------------------------------------------------------------
+# V73 / Postgres CI — opt-in fixture for tests that need a real Postgres.
+#
+# Most of the suite runs on SQLite (the `app` fixture above). A handful of
+# tests exercise behaviour that SQLite silently papers over:
+#   - case-sensitive LIKE / search_users (PR #20)
+#   - strict GROUP BY rules (PR #24)
+#   - round(double, int) signature (update_profit_margin)
+#   - Alembic upgrade against the production-shaped backend
+#
+# Those tests opt in with @pytest.mark.postgres and use this fixture. CI
+# provides TEST_POSTGRES_URL via a Postgres 16 service container; locally
+# the tests skip cleanly when the env var is unset, so day-to-day developer
+# runs stay SQLite-only and fast.
+#
+# The fixture:
+#   1. Points DATABASE_URL at the CI Postgres for the duration of the test
+#      (monkeypatch reverts it on teardown).
+#   2. Resets app.db.base's module-level engine so SQLAlchemy reconnects to
+#      Postgres instead of whatever an earlier test cached.
+#   3. Runs `alembic upgrade head` to materialise the production schema.
+#   4. Yields, then truncates the data tables on teardown so consecutive
+#      Postgres-marked tests start clean without paying the upgrade cost
+#      again. Tables are truncated in dependency-friendly order with
+#      RESTART IDENTITY CASCADE.
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def postgres_session(monkeypatch):
+    url = os.environ.get("TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("TEST_POSTGRES_URL not set")
+
+    monkeypatch.setenv("DATABASE_URL", url)
+
+    from app.db.base import reset_engine
+    reset_engine()
+
+    from alembic.config import Config
+    from alembic import command
+
+    cfg = Config("alembic.ini")
+    command.upgrade(cfg, "head")
+
+    yield
+
+    from sqlalchemy import text
+    from app.db.base import engine
+    with engine.begin() as c:
+        for tbl in (
+            "wishlist",
+            "audit_log",
+            "orders",
+            "deposits",
+            "products",
+            "product_groups",
+            "games",
+            "users",
+        ):
+            c.execute(text(f"TRUNCATE TABLE {tbl} RESTART IDENTITY CASCADE"))
