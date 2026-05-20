@@ -301,39 +301,188 @@ def validate_player_provider(provider: str, product_id: str, player_id: str) -> 
 
 # --- Supplier Order Status ---
 
-def _extract_order_id_from_response(provider: str, response: Dict[str, Any]) -> str:
-    """
-    استخراج رقم طلب المورد من الرد بأكثر من شكل محتمل.
+# V73: smart extractor for supplier order ids. Production logs (2026-05-20,
+# order id=32 on server2) showed a Shop2Topup response shaped like
+# ``{"success": true, "data": {"id": "...", "transaction_id": "..."}}``
+# leaking past the V68 parser because the legacy code only knew the exact
+# keys ``order_id``, ``id``, ``orderId`` inside ``data``. This rewrite
+# walks the whole tree (depth-bounded) and tries a priority list first,
+# then a substring fallback, then a "data is the id" special case.
+#
+# The constants below are deliberately tuned:
+#   - ``_PRIORITY_KEYS``: keys we trust as a definitive id, in order.
+#     ``order_id`` wins over ``id`` because the latter is ambiguous in
+#     some supplier shapes (e.g. ``id`` of a wallet entry).
+#   - ``_HINT_SUBSTRINGS``: last-resort match. We accept any key whose
+#     name *contains* one of these substrings, on the assumption that
+#     a custom supplier might call its id e.g. ``external_order_no``.
+#     We do NOT include "id" here because nearly every nested object
+#     has an ``id`` field.
+#   - ``_IGNORE_KEYS``: ``client_order_id`` is the UUID we mint locally
+#     before calling Shop2Topup (see ``shop2topup_create_order``). It is
+#     NOT the supplier's id. Various spelling variants are listed so a
+#     reformatter cannot smuggle it back in.
+#   - ``_DEPTH_CAP``: 6 is generous — known shapes max out at depth 3 —
+#     while still bounding the worst case for an attacker-controlled
+#     response.
+#   - ``_MAX_LEN``: 80 chars is twice the longest real id we have seen
+#     and rejects HTML / stack traces returned in a malformed response.
+_PRIORITY_KEYS = (
+    "order_id",
+    "transaction_id",
+    "tracking_id",
+    "reference_id",
+    "order",
+    "id",
+)
+_HINT_SUBSTRINGS = ("order", "transaction", "tracking", "reference")
+_IGNORE_KEYS = frozenset(
+    {
+        "client_order_id",
+        "clientorderid",
+        "client-order-id",
+    }
+)
+_DEPTH_CAP = 6
+_MAX_LEN = 80
 
-    V68 FIX: Shop2Topup يرجع الرد بصيغة:
-        {"success": true, "data": {"order_id": "...", "status": "..."}}
-    أو أحيانًا:
-        {"success": true, "data": {"id": "..."}}
-        {"success": true, "order": {...}}  (شكل قديم)
-    سابقًا كنا نبحث في `response["order"]` و`response["order_id"]` فقط،
-    فيُفقد رقم الطلب لأنه داخل `data` — وآلية المتابعة `refresh_pending_orders`
-    تتخطّاه لاحقًا لأن `provider_order_id` فارغ، فيبقى الطلب عالقًا.
+
+def _is_acceptable_id_value(v) -> bool:
+    """Return True iff ``v`` is plausibly a supplier-issued order id.
+
+    Rules (kept tight on purpose — we'd rather miss an id and re-parse
+    than persist garbage like ``True``/``""``/HTML):
+      - reject ``None`` and ``bool`` (``True``/``False`` would otherwise
+        pass through ``str()`` as the literal strings "True"/"False");
+      - reject containers (``dict``/``list``) — those are never ids;
+      - reject empty / whitespace-only strings after ``str().strip()``;
+      - reject anything longer than ``_MAX_LEN`` characters.
+    """
+    if v is None or isinstance(v, bool):
+        return False
+    if isinstance(v, (dict, list)):
+        return False
+    try:
+        s = str(v).strip()
+    except Exception:
+        return False
+    if not s:
+        return False
+    if len(s) > _MAX_LEN:
+        return False
+    return True
+
+
+def _walk_id_candidates(node, depth=0):
+    """Depth-bounded traversal yielding ``(lower_key, value)`` pairs.
+
+    Skips keys in ``_IGNORE_KEYS`` entirely (and does NOT descend into
+    their values either) so a nested ``client_order_id`` cannot leak
+    out via the substring fallback. Tolerates non-string keys by
+    coercing through ``str()`` — the resulting candidate is rejected by
+    ``_is_acceptable_id_value`` if it cannot stringify cleanly.
+    """
+    if depth > _DEPTH_CAP:
+        return
+    if isinstance(node, dict):
+        for k, v in node.items():
+            try:
+                kl = str(k).lower()
+            except Exception:
+                continue
+            if kl in _IGNORE_KEYS:
+                continue
+            yield kl, v
+            if isinstance(v, (dict, list)):
+                yield from _walk_id_candidates(v, depth + 1)
+    elif isinstance(node, list):
+        for item in node:
+            if isinstance(item, (dict, list)):
+                yield from _walk_id_candidates(item, depth + 1)
+
+
+def _extract_order_id_from_response(provider: str, response: Dict[str, Any]) -> str:
+    """Find the supplier's order id in any response shape we know.
+
+    V73: rewritten as a depth-bounded recursive search.
+
+    Strategy (in order, first match wins):
+
+      1. **Known V68 paths.** Check the exact top-level + ``data``/
+         ``order``/``result`` keys the legacy code looked at. This
+         keeps behaviour identical for already-healthy responses and
+         is the fastest path for the hot case.
+      2. **Special case: ``data`` is a scalar.** Some suppliers reply
+         ``{"success": true, "data": "ABC123"}`` — the id IS the data.
+      3. **Priority recursive walk.** For each key in
+         ``_PRIORITY_KEYS`` (in priority order), scan the entire tree
+         for that key and return the first acceptable value. This lets
+         ``order_id`` beat ``id`` even when both are present.
+      4. **Substring fallback.** Walk the tree once more and accept
+         any key containing one of ``_HINT_SUBSTRINGS``. Catches
+         supplier-specific names like ``external_order_no``.
+
+    Always ignores ``client_order_id`` (the locally-minted UUID).
+    Hard depth cap of 6 prevents pathological inputs from blowing up
+    the stack, and a value-length filter rejects HTML / stack traces
+    that some suppliers return in malformed responses.
     """
     if not isinstance(response, dict):
         return ""
 
+    # 1) Known V68 paths — fast path for healthy responses.
     if provider == "server1":
-        # G2Bulk: قد يأتي إما في المستوى الأعلى أو داخل data.
+        # G2Bulk: top-level or under ``data``.
         oid = response.get("order") or response.get("order_id") or response.get("id")
         if not oid and isinstance(response.get("data"), dict):
             d = response["data"]
             oid = d.get("order") or d.get("order_id") or d.get("id")
-        return str(oid or "")
+        if _is_acceptable_id_value(oid):
+            return str(oid).strip()
+    else:
+        # server2 (Shop2Topup) + any other / unknown provider.
+        for container_key in ("data", "order", "result"):
+            container = response.get(container_key)
+            if isinstance(container, dict):
+                oid = (
+                    container.get("order_id")
+                    or container.get("id")
+                    or container.get("orderId")
+                )
+                if _is_acceptable_id_value(oid):
+                    return str(oid).strip()
+        oid = (
+            response.get("order_id")
+            or response.get("id")
+            or response.get("orderId")
+        )
+        if _is_acceptable_id_value(oid):
+            return str(oid).strip()
 
-    # server2 = Shop2Topup
-    # نجرب كل الأشكال المعروفة بالترتيب الأكثر شيوعًا.
-    for container_key in ("data", "order", "result"):
-        container = response.get(container_key)
-        if isinstance(container, dict):
-            oid = container.get("order_id") or container.get("id") or container.get("orderId")
-            if oid:
-                return str(oid)
-    return str(response.get("order_id") or response.get("id") or response.get("orderId") or "")
+    # 2) Special case: ``data`` itself is a scalar carrying the id.
+    data_val = response.get("data")
+    if (
+        not isinstance(data_val, (dict, list))
+        and _is_acceptable_id_value(data_val)
+    ):
+        return str(data_val).strip()
+
+    # Materialise the candidate stream once so we can iterate over it
+    # twice (priority pass + substring pass) without re-walking.
+    candidates = list(_walk_id_candidates(response))
+
+    # 3) Priority-key recursive walk.
+    for prio in _PRIORITY_KEYS:
+        for k, v in candidates:
+            if k == prio and _is_acceptable_id_value(v):
+                return str(v).strip()
+
+    # 4) Substring fallback.
+    for k, v in candidates:
+        if any(h in k for h in _HINT_SUBSTRINGS) and _is_acceptable_id_value(v):
+            return str(v).strip()
+
+    return ""
 
 
 def _extract_status_from_response(provider: str, response: Dict[str, Any]) -> str:

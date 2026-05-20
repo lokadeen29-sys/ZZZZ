@@ -39,6 +39,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text as sa_text,
 )
 
 from app.db.base import Base
@@ -224,12 +225,29 @@ class Order(Base):
     created_at = Column(Integer, nullable=False)
     updated_at = Column(Integer, nullable=False)
 
+    # V73: raw supplier response captured BEFORE parsing. Truncated to
+    # 4 KiB by ``database.update_order_provider_response`` so a stuck
+    # ``supplier_pending`` order can always be diagnosed even when the
+    # order_id extractor fails.
+    provider_response_raw = Column(Text)
+
 
 Index("idx_orders_user_id", Order.user_id)
 Index("idx_orders_status", Order.status)
 Index("idx_orders_created_at", Order.created_at)
 Index("idx_orders_user_created", Order.user_id, Order.created_at.desc())
 Index("idx_orders_status_created", Order.status, Order.created_at.desc())
+
+# V73: orphan-watch index. Partial on Postgres so it only covers rows the
+# orphan-recovery query actually walks; on SQLite SQLAlchemy ignores the
+# ``postgresql_where`` kwarg and creates a plain composite index, which is
+# still cheap enough for the test suite.
+Index(
+    "idx_orders_orphan",
+    Order.status,
+    Order.provider_order_id,
+    postgresql_where=sa_text("provider_response_raw IS NOT NULL"),
+)
 
 
 # ---------------------------------------------------------------------------
